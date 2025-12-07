@@ -193,33 +193,62 @@ describe('Score System', () => {
   });
 
   describe('calculateGrade', () => {
-    it('returns AAA for 100%', () => {
-      expect(calculateGrade(100)).toBe('AAA');
+    // Helper to create a score state with specific judgment counts
+    const makeState = (counts: Partial<Record<string, number>>, totalNotes = 100) => ({
+      rawScore: 0,
+      maxPossibleScore: 0,
+      combo: 0,
+      maxCombo: 0,
+      judgmentCounts: {
+        marvelous: counts.marvelous ?? 0,
+        perfect: counts.perfect ?? 0,
+        great: counts.great ?? 0,
+        good: counts.good ?? 0,
+        boo: counts.boo ?? 0,
+        miss: counts.miss ?? 0,
+      },
+      totalJudged: totalNotes,
+      totalNotes,
+      health: 50,
+      failed: false,
     });
 
-    it('returns AA for 93%+', () => {
-      expect(calculateGrade(93)).toBe('AA');
-      expect(calculateGrade(99)).toBe('AA');
+    it('returns AAAA for all Marvelous', () => {
+      expect(calculateGrade(makeState({ marvelous: 100 }))).toBe('AAAA');
     });
 
-    it('returns A for 80%+', () => {
-      expect(calculateGrade(80)).toBe('A');
-      expect(calculateGrade(92.9)).toBe('A');
+    it('returns AAA for all Marvelous/Perfect (no Great or worse)', () => {
+      expect(calculateGrade(makeState({ marvelous: 50, perfect: 50 }))).toBe('AAA');
+      expect(calculateGrade(makeState({ perfect: 100 }))).toBe('AAA');
     });
 
-    it('returns B for 65%+', () => {
-      expect(calculateGrade(65)).toBe('B');
-      expect(calculateGrade(79.9)).toBe('B');
+    it('returns AA for high percentage with some Greats', () => {
+      // 93+ Marvelous, 7 Great = 93*100 + 7*65 = 9755 / 10000 = 97.55%
+      expect(calculateGrade(makeState({ marvelous: 93, great: 7 }))).toBe('AA');
     });
 
-    it('returns C for 45%+', () => {
-      expect(calculateGrade(45)).toBe('C');
-      expect(calculateGrade(64.9)).toBe('C');
+    it('returns A for 80%+ with mixed judgments', () => {
+      // 80 Marvelous, 20 Great = 80*100 + 20*65 = 9300 / 10000 = 93% -> AA
+      // 70 Marvelous, 30 Great = 70*100 + 30*65 = 8950 / 10000 = 89.5% -> A
+      expect(calculateGrade(makeState({ marvelous: 70, great: 30 }))).toBe('A');
+    });
+
+    it('returns B for 65%+ with poor judgments', () => {
+      // 50 Marvelous, 50 Good = 50*100 + 50*25 = 6250 / 10000 = 62.5% -> C
+      // 60 Marvelous, 40 Great = 60*100 + 40*65 = 8600 / 10000 = 86% -> A
+      // 40 Marvelous, 60 Great = 40*100 + 60*65 = 7900 / 10000 = 79% -> B
+      expect(calculateGrade(makeState({ marvelous: 40, great: 60 }))).toBe('B');
+    });
+
+    it('returns C for 45%+ with many misses', () => {
+      // 45 Marvelous, 55 Miss = 45*100 + 55*0 = 4500 / 10000 = 45% -> C
+      expect(calculateGrade(makeState({ marvelous: 45, miss: 55 }))).toBe('C');
     });
 
     it('returns D for <45%', () => {
-      expect(calculateGrade(44.9)).toBe('D');
-      expect(calculateGrade(0)).toBe('D');
+      // 40 Marvelous, 60 Miss = 40*100 / 10000 = 40% -> D
+      expect(calculateGrade(makeState({ marvelous: 40, miss: 60 }))).toBe('D');
+      expect(calculateGrade(makeState({ miss: 100 }))).toBe('D');
     });
   });
 });
