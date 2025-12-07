@@ -218,6 +218,7 @@ export class SongSelectScreen {
   private pendingRadarData: GrooveRadar | null = null;
   private currentPreviewSongId: string | null = null;
   private previewDebounceTimer: number | null = null;
+  private animationStartTime: number = performance.now();
 
   constructor(container: HTMLElement, callbacks: SongSelectCallbacks) {
     this.container = container;
@@ -535,8 +536,15 @@ export class SongSelectScreen {
     const currentSong = currentPack?.songs[this.selectedSongIndex];
     const currentChart = currentSong?.charts[this.selectedDifficultyIndex];
 
+    // Calculate animation delay to keep animations synced across re-renders
+    const elapsedMs = performance.now() - this.animationStartTime;
+    const glowDurationMs = 2000; // Match --glow-speed default
+    const shimmerDurationMs = 3000; // play-button-shimmer duration
+    const arcAnimationDelay = -(elapsedMs % glowDurationMs);
+    const shimmerAnimationDelay = -(elapsedMs % shimmerDurationMs);
+
     this.container.innerHTML = `
-      <div class="song-select-4col">
+      <div class="song-select-4col" style="--arc-animation-delay: ${arcAnimationDelay}ms; --shimmer-animation-delay: ${shimmerAnimationDelay}ms">
         <div class="header">
           <h1 class="title">SELECT SONG</h1>
           <div class="header-actions">
@@ -1268,6 +1276,7 @@ export class SongSelectScreen {
       .column.active .wheel-border::after {
         border-left-color: ${THEME.accent.primary};
         animation: arc-glow var(--glow-speed, 2s) ease-in-out infinite;
+        animation-delay: var(--arc-animation-delay, 0ms);
       }
 
       @keyframes arc-glow {
@@ -1525,7 +1534,7 @@ export class SongSelectScreen {
         font-weight: 700;
         letter-spacing: 1px;
         cursor: pointer;
-        animation: play-button-glow var(--glow-speed, 2s) ease-in-out infinite, play-button-shimmer 3s ease-in-out infinite;
+        animation: play-button-glow var(--glow-speed, 2s) ease-in-out infinite var(--arc-animation-delay, 0ms), play-button-shimmer 3s ease-in-out infinite var(--shimmer-animation-delay, 0ms);
         transition: transform 0.15s ease;
       }
 
