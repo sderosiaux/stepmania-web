@@ -190,6 +190,42 @@ describe('Score System', () => {
 
       expect(calculatePercentage(state)).toBe(0);
     });
+
+    it('cannot exceed 100% with many hold notes (2 judgments per hold)', () => {
+      // Simulate a chart with 5 tap notes + 5 hold notes
+      // Hold notes generate 2 judgments each (head + tail)
+      // Total judgments = 5 taps + 5 holds * 2 = 15
+      const totalJudgments = 15;
+      let state = createScoreState(totalJudgments);
+
+      // All 15 judgments are marvelous (best possible)
+      for (let i = 0; i < totalJudgments; i++) {
+        state = applyJudgment(state, { noteId: i, timingDiff: 0, grade: 'marvelous', time: i * 100 });
+      }
+
+      const percentage = calculatePercentage(state);
+      expect(percentage).toBe(100);
+      expect(percentage).toBeLessThanOrEqual(100);
+    });
+
+    it('calculates correct percentage for hold-heavy chart with mixed judgments', () => {
+      // 10 hold notes = 20 judgments (head + tail each)
+      const totalJudgments = 20;
+      let state = createScoreState(totalJudgments);
+
+      // 10 marvelous (heads) + 10 perfect (tails)
+      for (let i = 0; i < 10; i++) {
+        state = applyJudgment(state, { noteId: i, timingDiff: 0, grade: 'marvelous', time: i * 100 });
+      }
+      for (let i = 10; i < 20; i++) {
+        state = applyJudgment(state, { noteId: i, timingDiff: 20, grade: 'perfect', time: i * 100 });
+      }
+
+      const percentage = calculatePercentage(state);
+      // (10 * 100 + 10 * 98) / (20 * 100) = 1980 / 2000 = 99%
+      expect(percentage).toBe(99);
+      expect(percentage).toBeLessThanOrEqual(100);
+    });
   });
 
   describe('calculateGrade', () => {
