@@ -74,7 +74,19 @@ export const LAYOUT = {
   lookAhead: 2500,
   /** Receptor glow duration on press (ms) */
   receptorGlowDuration: 100,
+  /** Guitar Hero perspective: vanishing point Y position (as fraction of height) */
+  vanishingY: 0.35,
+  /** Guitar Hero perspective: scale at vanishing point (0-1) */
+  horizonScale: 0.15,
 } as const;
+
+/** Direction to rotation angle mapping (arrow points up by default) */
+export const DIRECTION_ROTATIONS: Record<Direction, number> = {
+  up: 0,
+  down: Math.PI,
+  left: -Math.PI / 2,
+  right: Math.PI / 2,
+};
 
 // ============================================================================
 // Renderer Class
@@ -227,151 +239,61 @@ export class Renderer {
    * Draw animated gradient background with dim overlay (health-reactive with smooth transitions)
    */
   private drawAnimatedBackground(currentTime: number = Date.now(), health: number = 50): void {
-    const time = currentTime / 2000; // Animation speed
+    const time = currentTime / 2000;
 
     // Calculate delta time for smooth lerping
     const deltaTime = this.lastFrameTime > 0 ? (currentTime - this.lastFrameTime) / 1000 : 0.016;
     this.lastFrameTime = currentTime;
 
-    // Smoothly lerp towards target health (faster when dropping, slower when rising)
-    const lerpSpeed = health < this.smoothedHealth ? 8 : 3; // Drop fast, recover slow
+    // Smoothly lerp towards target health
+    const lerpSpeed = health < this.smoothedHealth ? 8 : 3;
     this.smoothedHealth += (health - this.smoothedHealth) * Math.min(1, deltaTime * lerpSpeed);
 
-    // Use smoothed health for all calculations
-    const h = this.smoothedHealth;
-    const isLowHealth = h < 30;
-    const isHighHealth = h > 75;
-    const isCriticalHealth = h < 15;
-
-    // Pulse speed increases when health is low
-    const pulseSpeed = isCriticalHealth ? 10 : (isLowHealth ? 5 : 1);
+    // Calculate pulse based on health state
+    const isCritical = this.smoothedHealth < 15;
+    const isLow = this.smoothedHealth < 30;
+    const pulseSpeed = isCritical ? 10 : (isLow ? 5 : 1);
     const pulse = Math.sin(currentTime / (200 / pulseSpeed)) * 0.5 + 0.5;
 
-    // Create moving gradient points
+    // Get health-based colors
+    const { colors, dimOpacity } = this.calculateHealthColors(this.smoothedHealth, pulse);
+    const [color1, color2, color3] = colors;
+
+    // Create moving gradient center points
     const cx1 = this.width * (0.3 + 0.25 * Math.sin(time * 0.7));
     const cy1 = this.height * (0.3 + 0.25 * Math.cos(time * 0.5));
     const cx2 = this.width * (0.7 + 0.25 * Math.cos(time * 0.6));
     const cy2 = this.height * (0.7 + 0.25 * Math.sin(time * 0.8));
-
-    // Define color stops for different health ranges
-    let color1, color2, color3;
-
-    if (isCriticalHealth) {
-      // Critical: intense pulsing red
-      const intensity = 0.5 + pulse * 0.35;
-      color1 = { r: 255, g: 20, b: 20, a: intensity };
-      color2 = { r: 200, g: 0, b: 50, a: intensity * 0.8 };
-      color3 = { r: 255, g: 50, b: 30, a: intensity * 0.6 };
-    } else if (isLowHealth) {
-      // Low: red/orange warning - blend based on how low
-      const lowBlend = (30 - h) / 15; // 0 at 30, 1 at 15
-      const intensity = 0.35 + pulse * 0.15 + lowBlend * 0.1;
-      color1 = {
-        r: Math.round(180 + lowBlend * 75),
-        g: Math.round(80 - lowBlend * 60),
-        b: Math.round(50 - lowBlend * 30),
-        a: intensity
-      };
-      color2 = {
-        r: Math.round(200 + lowBlend * 55),
-        g: Math.round(100 - lowBlend * 80),
-        b: Math.round(20),
-        a: intensity * 0.7
-      };
-      color3 = {
-        r: Math.round(220 + lowBlend * 35),
-        g: Math.round(80 - lowBlend * 50),
-        b: Math.round(40 - lowBlend * 20),
-        a: intensity * 0.5
-      };
-    } else if (isHighHealth) {
-      // High: vibrant green/cyan - more intense
-      const highBlend = (h - 75) / 25; // 0 at 75, 1 at 100
-      color1 = {
-        r: 0,
-        g: Math.round(200 + highBlend * 55),
-        b: Math.round(150 + highBlend * 50),
-        a: 0.4 + highBlend * 0.15
-      };
-      color2 = {
-        r: 0,
-        g: Math.round(180 + highBlend * 40),
-        b: Math.round(200 + highBlend * 30),
-        a: 0.35 + highBlend * 0.1
-      };
-      color3 = {
-        r: Math.round(50 + highBlend * 30),
-        g: Math.round(255),
-        b: Math.round(180 + highBlend * 40),
-        a: 0.3 + highBlend * 0.1
-      };
-    } else {
-      // Normal (30-75): purple/blue/teal - blend between low-warning and high-good
-      const normalBlend = (h - 30) / 45; // 0 at 30, 1 at 75
-      color1 = {
-        r: Math.round(180 - normalBlend * 30),
-        g: Math.round(80 * normalBlend),
-        b: Math.round(100 + normalBlend * 80),
-        a: 0.35
-      };
-      color2 = {
-        r: Math.round(100 - normalBlend * 100),
-        g: Math.round(100 + normalBlend * 50),
-        b: Math.round(180 + normalBlend * 40),
-        a: 0.3
-      };
-      color3 = {
-        r: Math.round(50 - normalBlend * 50),
-        g: Math.round(150 + normalBlend * 50),
-        b: Math.round(180 + normalBlend * 20),
-        a: 0.25
-      };
-    }
-
-    // First gradient blob - larger and more intense
-    const gradient1 = this.ctx.createRadialGradient(
-      cx1, cy1, 0,
-      cx1, cy1, this.width * 0.8
-    );
-    gradient1.addColorStop(0, `rgba(${color1.r}, ${color1.g}, ${color1.b}, ${color1.a})`);
-    gradient1.addColorStop(0.3, `rgba(${color1.r}, ${color1.g}, ${color1.b}, ${color1.a * 0.7})`);
-    gradient1.addColorStop(0.6, `rgba(${color1.r}, ${color1.g}, ${color1.b}, ${color1.a * 0.3})`);
-    gradient1.addColorStop(1, 'transparent');
-
-    this.ctx.fillStyle = gradient1;
-    this.ctx.fillRect(0, 0, this.width, this.height);
-
-    // Second gradient blob
-    const gradient2 = this.ctx.createRadialGradient(
-      cx2, cy2, 0,
-      cx2, cy2, this.width * 0.7
-    );
-    gradient2.addColorStop(0, `rgba(${color2.r}, ${color2.g}, ${color2.b}, ${color2.a})`);
-    gradient2.addColorStop(0.35, `rgba(${color2.r}, ${color2.g}, ${color2.b}, ${color2.a * 0.6})`);
-    gradient2.addColorStop(0.7, `rgba(${color2.r}, ${color2.g}, ${color2.b}, ${color2.a * 0.2})`);
-    gradient2.addColorStop(1, 'transparent');
-
-    this.ctx.fillStyle = gradient2;
-    this.ctx.fillRect(0, 0, this.width, this.height);
-
-    // Third gradient blob - moves differently
     const cx3 = this.width * (0.5 + 0.3 * Math.sin(time * 0.4 + 1));
     const cy3 = this.height * (0.6 + 0.25 * Math.cos(time * 0.3 + 2));
 
-    const gradient3 = this.ctx.createRadialGradient(
-      cx3, cy3, 0,
-      cx3, cy3, this.width * 0.6
-    );
-    gradient3.addColorStop(0, `rgba(${color3.r}, ${color3.g}, ${color3.b}, ${color3.a})`);
-    gradient3.addColorStop(0.4, `rgba(${color3.r}, ${color3.g}, ${color3.b}, ${color3.a * 0.5})`);
-    gradient3.addColorStop(1, 'transparent');
+    // Draw three gradient blobs
+    this.drawGradientBlob(cx1, cy1, this.width * 0.8, color1, [0, 0.3, 0.6, 1], [1, 0.7, 0.3, 0]);
+    this.drawGradientBlob(cx2, cy2, this.width * 0.7, color2, [0, 0.35, 0.7, 1], [1, 0.6, 0.2, 0]);
+    this.drawGradientBlob(cx3, cy3, this.width * 0.6, color3, [0, 0.4, 1], [1, 0.5, 0]);
 
-    this.ctx.fillStyle = gradient3;
-    this.ctx.fillRect(0, 0, this.width, this.height);
-
-    // Dim overlay - less dim for more intense colors
-    const dimOpacity = isCriticalHealth ? 0.25 : (isLowHealth ? 0.32 : (isHighHealth ? 0.35 : 0.4));
+    // Dim overlay
     this.ctx.fillStyle = `rgba(10, 10, 15, ${dimOpacity})`;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  /**
+   * Draw a single radial gradient blob
+   */
+  private drawGradientBlob(
+    cx: number,
+    cy: number,
+    radius: number,
+    color: { r: number; g: number; b: number; a: number },
+    stops: number[],
+    alphaMultipliers: number[]
+  ): void {
+    const gradient = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    for (let i = 0; i < stops.length; i++) {
+      const alpha = color.a * alphaMultipliers[i]!;
+      gradient.addColorStop(stops[i]!, alpha > 0 ? `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})` : 'transparent');
+    }
+    this.ctx.fillStyle = gradient;
     this.ctx.fillRect(0, 0, this.width, this.height);
   }
 
@@ -412,14 +334,7 @@ export class Renderer {
       // Draw filled arrow interior
       this.ctx.save();
       this.ctx.translate(flash.x, this.receptorY);
-
-      const rotations: Record<Direction, number> = {
-        up: 0,
-        down: Math.PI,
-        left: -Math.PI / 2,
-        right: Math.PI / 2,
-      };
-      this.ctx.rotate(rotations[dir]);
+      this.ctx.rotate(DIRECTION_ROTATIONS[dir]);
 
       const s = LAYOUT.arrowSize / 2 * 0.85; // Slightly smaller
 
@@ -455,6 +370,93 @@ export class Renderer {
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     return { r, g, b };
+  }
+
+  /**
+   * Calculate health-based background colors for gradient blobs
+   */
+  private calculateHealthColors(health: number, pulse: number): {
+    colors: [{ r: number; g: number; b: number; a: number }, { r: number; g: number; b: number; a: number }, { r: number; g: number; b: number; a: number }];
+    dimOpacity: number;
+  } {
+    const h = health;
+    const isLowHealth = h < 30;
+    const isHighHealth = h > 75;
+    const isCriticalHealth = h < 15;
+
+    let color1, color2, color3;
+
+    if (isCriticalHealth) {
+      const intensity = 0.5 + pulse * 0.35;
+      color1 = { r: 255, g: 20, b: 20, a: intensity };
+      color2 = { r: 200, g: 0, b: 50, a: intensity * 0.8 };
+      color3 = { r: 255, g: 50, b: 30, a: intensity * 0.6 };
+    } else if (isLowHealth) {
+      const lowBlend = (30 - h) / 15;
+      const intensity = 0.35 + pulse * 0.15 + lowBlend * 0.1;
+      color1 = {
+        r: Math.round(180 + lowBlend * 75),
+        g: Math.round(80 - lowBlend * 60),
+        b: Math.round(50 - lowBlend * 30),
+        a: intensity
+      };
+      color2 = {
+        r: Math.round(200 + lowBlend * 55),
+        g: Math.round(100 - lowBlend * 80),
+        b: 20,
+        a: intensity * 0.7
+      };
+      color3 = {
+        r: Math.round(220 + lowBlend * 35),
+        g: Math.round(80 - lowBlend * 50),
+        b: Math.round(40 - lowBlend * 20),
+        a: intensity * 0.5
+      };
+    } else if (isHighHealth) {
+      const highBlend = (h - 75) / 25;
+      color1 = {
+        r: 0,
+        g: Math.round(200 + highBlend * 55),
+        b: Math.round(150 + highBlend * 50),
+        a: 0.4 + highBlend * 0.15
+      };
+      color2 = {
+        r: 0,
+        g: Math.round(180 + highBlend * 40),
+        b: Math.round(200 + highBlend * 30),
+        a: 0.35 + highBlend * 0.1
+      };
+      color3 = {
+        r: Math.round(50 + highBlend * 30),
+        g: 255,
+        b: Math.round(180 + highBlend * 40),
+        a: 0.3 + highBlend * 0.1
+      };
+    } else {
+      const normalBlend = (h - 30) / 45;
+      color1 = {
+        r: Math.round(180 - normalBlend * 30),
+        g: Math.round(80 * normalBlend),
+        b: Math.round(100 + normalBlend * 80),
+        a: 0.35
+      };
+      color2 = {
+        r: Math.round(100 - normalBlend * 100),
+        g: Math.round(100 + normalBlend * 50),
+        b: Math.round(180 + normalBlend * 40),
+        a: 0.3
+      };
+      color3 = {
+        r: Math.round(50 - normalBlend * 50),
+        g: Math.round(150 + normalBlend * 50),
+        b: Math.round(180 + normalBlend * 20),
+        a: 0.25
+      };
+    }
+
+    const dimOpacity = isCriticalHealth ? 0.25 : (isLowHealth ? 0.32 : (isHighHealth ? 0.35 : 0.4));
+
+    return { colors: [color1, color2, color3], dimOpacity };
   }
 
   /**
@@ -782,8 +784,8 @@ export class Renderer {
     const centerX = this.width / 2;
 
     // Vanishing point settings
-    const vanishingY = this.height * 0.35;
-    const horizonScale = 0.15; // How narrow lanes are at vanishing point
+    const vanishingY = this.height * LAYOUT.vanishingY;
+    const horizonScale = LAYOUT.horizonScale;
 
     // Calculate lane positions at receptor (bottom)
     const lanePositions: { left: number; right: number }[] = [];
@@ -1044,13 +1046,7 @@ export class Renderer {
     this.ctx.translate(x, y);
 
     // Rotate based on direction (arrow points up by default)
-    const rotations: Record<Direction, number> = {
-      up: 0,
-      down: Math.PI,
-      left: -Math.PI / 2,
-      right: Math.PI / 2,
-    };
-    this.ctx.rotate(rotations[direction]);
+    this.ctx.rotate(DIRECTION_ROTATIONS[direction]);
 
     this.ctx.globalAlpha = alpha;
 
@@ -1199,6 +1195,39 @@ export class Renderer {
     return `rgb(${r}, ${g}, ${b})`;
   }
 
+  /** Hold body color constant */
+  private readonly HOLD_BODY_COLOR = '#ffcc00';
+
+  /**
+   * Get hold body gradient colors based on state
+   */
+  private getHoldBodyColors(isDropped: boolean, isActive: boolean): {
+    start: string;
+    mid: string;
+    end: string;
+    applyShadow: boolean;
+  } {
+    if (isDropped) {
+      return { start: '#333344', mid: '#444455', end: '#333344', applyShadow: false };
+    }
+    const rgb = this.hexToRgb(this.HOLD_BODY_COLOR);
+    if (isActive) {
+      const bright = `rgba(${Math.min(255, rgb.r + 80)}, ${Math.min(255, rgb.g + 80)}, ${Math.min(255, rgb.b + 80)}, 1)`;
+      return {
+        start: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`,
+        mid: bright,
+        end: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`,
+        applyShadow: true
+      };
+    }
+    return {
+      start: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`,
+      mid: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`,
+      end: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`,
+      applyShadow: false
+    };
+  }
+
   /**
    * Draw all notes
    * @param cmod - CMod speed in pixels/second (0 = use BPM-based)
@@ -1224,10 +1253,10 @@ export class Renderer {
     // Calculate look-ahead time based on screen height
     const lookAheadMs = this.height / pixelsPerMs;
 
-    // Guitar Hero perspective settings (must match drawLanes3D)
-    const vanishingPointY = isGems ? this.height * 0.35 : 0; // Where notes appear from
+    // Guitar Hero perspective settings
+    const vanishingPointY = isGems ? this.height * LAYOUT.vanishingY : 0;
     const perspectiveRange = isGems ? (this.receptorY - vanishingPointY) : 0;
-    const horizonScale = 0.15; // Must match drawLanes3D
+    const horizonScale = LAYOUT.horizonScale;
 
     // Draw hold notes first (so tap notes render on top)
     for (const note of notes) {
@@ -1357,7 +1386,6 @@ export class Renderer {
    */
   private drawHoldNoteFlat(note: Note, currentTime: number, pixelsPerMs: number): void {
     const x = this.columnX[note.direction];
-    const holdBodyColor = '#ffcc00';
     const holdState = note.holdState;
 
     const headTimeDiff = note.time - currentTime;
@@ -1370,8 +1398,8 @@ export class Renderer {
       headY = this.receptorY;
     }
 
-    const isActive = holdState?.isHeld && holdState?.started && !holdState?.completed;
-    const isDropped = holdState?.dropped;
+    const isActive = !!(holdState?.isHeld && holdState?.started && !holdState?.completed);
+    const isDropped = !!holdState?.dropped;
     const bodyWidth = LAYOUT.arrowSize * 0.45;
 
     this.ctx.save();
@@ -1381,24 +1409,15 @@ export class Renderer {
     const bodyHeight = bodyBottom - bodyTop;
 
     if (bodyHeight > 0) {
+      const colors = this.getHoldBodyColors(isDropped, isActive);
       const bodyGradient = this.ctx.createLinearGradient(x - bodyWidth / 2, 0, x + bodyWidth / 2, 0);
+      bodyGradient.addColorStop(0, colors.start);
+      bodyGradient.addColorStop(0.5, colors.mid);
+      bodyGradient.addColorStop(1, colors.end);
 
-      if (isDropped) {
-        bodyGradient.addColorStop(0, '#333344');
-        bodyGradient.addColorStop(0.5, '#444455');
-        bodyGradient.addColorStop(1, '#333344');
-      } else if (isActive) {
-        const rgb = this.hexToRgb(holdBodyColor);
-        bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
-        bodyGradient.addColorStop(0.5, `rgba(${Math.min(255, rgb.r + 80)}, ${Math.min(255, rgb.g + 80)}, ${Math.min(255, rgb.b + 80)}, 1)`);
-        bodyGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
-        this.ctx.shadowColor = holdBodyColor;
+      if (colors.applyShadow) {
+        this.ctx.shadowColor = this.HOLD_BODY_COLOR;
         this.ctx.shadowBlur = 15;
-      } else {
-        const rgb = this.hexToRgb(holdBodyColor);
-        bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
-        bodyGradient.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`);
-        bodyGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
       }
 
       this.ctx.fillStyle = bodyGradient;
@@ -1431,16 +1450,16 @@ export class Renderer {
         capGradient.addColorStop(0, '#444455');
         capGradient.addColorStop(1, '#333344');
       } else {
-        const rgb = this.hexToRgb(holdBodyColor);
+        const rgb = this.hexToRgb(this.HOLD_BODY_COLOR);
         capGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
-        capGradient.addColorStop(1, this.darkenColor(holdBodyColor, 30));
+        capGradient.addColorStop(1, this.darkenColor(this.HOLD_BODY_COLOR, 30));
       }
 
       this.ctx.fillStyle = capGradient;
       this.roundRect(x - bodyWidth / 2, tailY - capHeight, bodyWidth, capHeight, 4);
       this.ctx.fill();
 
-      this.ctx.strokeStyle = isDropped ? '#555566' : this.darkenColor(holdBodyColor, 20);
+      this.ctx.strokeStyle = isDropped ? '#555566' : this.darkenColor(this.HOLD_BODY_COLOR, 20);
       this.ctx.lineWidth = 2;
       this.roundRect(x - bodyWidth / 2, tailY - capHeight, bodyWidth, capHeight, 4);
       this.ctx.stroke();
@@ -1453,14 +1472,13 @@ export class Renderer {
    * Draw hold note for Guitar Hero style (3D perspective, notes come from top)
    */
   private drawHoldNote3D(note: Note, currentTime: number, pixelsPerMs: number): void {
-    const holdBodyColor = '#ffcc00';
     const holdState = note.holdState;
     const centerX = this.width / 2;
     const baseX = this.columnX[note.direction];
 
-    // Perspective settings (must match drawLanes3D and drawNotes)
-    const vanishingY = this.height * 0.35;
-    const horizonScale = 0.15;
+    // Perspective settings
+    const vanishingY = this.height * LAYOUT.vanishingY;
+    const horizonScale = LAYOUT.horizonScale;
     const perspectiveRange = this.receptorY - vanishingY;
 
     // Calculate time differences
@@ -1493,8 +1511,8 @@ export class Renderer {
     const head = getScaleAndX(headY);
     const tail = getScaleAndX(tailY);
 
-    const isActive = holdState?.isHeld && holdState?.started && !holdState?.completed;
-    const isDropped = holdState?.dropped;
+    const isActive = !!(holdState?.isHeld && holdState?.started && !holdState?.completed);
+    const isDropped = !!holdState?.dropped;
     const bodyWidthBase = LAYOUT.arrowSize * 0.45;
 
     this.ctx.save();
@@ -1512,21 +1530,15 @@ export class Renderer {
       this.ctx.lineTo(head.x - headWidth / 2, headY);
       this.ctx.closePath();
 
-      // Body gradient
+      // Body gradient (use start/end for 2-stop gradient in 3D mode)
+      const colors = this.getHoldBodyColors(isDropped, isActive);
       const bodyGradient = this.ctx.createLinearGradient(0, tailY, 0, headY);
-      if (isDropped) {
-        bodyGradient.addColorStop(0, '#333344');
-        bodyGradient.addColorStop(1, '#444455');
-      } else if (isActive) {
-        const rgb = this.hexToRgb(holdBodyColor);
-        bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
-        bodyGradient.addColorStop(1, `rgba(${Math.min(255, rgb.r + 80)}, ${Math.min(255, rgb.g + 80)}, ${Math.min(255, rgb.b + 80)}, 1)`);
-        this.ctx.shadowColor = holdBodyColor;
+      bodyGradient.addColorStop(0, colors.start);
+      bodyGradient.addColorStop(1, colors.mid);
+
+      if (colors.applyShadow) {
+        this.ctx.shadowColor = this.HOLD_BODY_COLOR;
         this.ctx.shadowBlur = 15;
-      } else {
-        const rgb = this.hexToRgb(holdBodyColor);
-        bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.4)`);
-        bodyGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`);
       }
 
       this.ctx.fillStyle = bodyGradient;
@@ -1570,7 +1582,7 @@ export class Renderer {
       if (isDropped) {
         this.ctx.fillStyle = '#444455';
       } else {
-        this.ctx.fillStyle = this.darkenColor(holdBodyColor, 20);
+        this.ctx.fillStyle = this.darkenColor(this.HOLD_BODY_COLOR, 20);
       }
       this.ctx.fill();
     }
@@ -1615,13 +1627,7 @@ export class Renderer {
       this.ctx.translate(x, y);
 
       // Rotate based on direction
-      const rotations: Record<Direction, number> = {
-        up: 0,
-        down: Math.PI,
-        left: -Math.PI / 2,
-        right: Math.PI / 2,
-      };
-      this.ctx.rotate(rotations[effect.direction]);
+      this.ctx.rotate(DIRECTION_ROTATIONS[effect.direction]);
 
       // Get color based on judgment
       const color = THEME.judgment[effect.grade];
@@ -1874,15 +1880,22 @@ export class Renderer {
     this.ctx.fillText('COMBO', centerX, centerY + 38);
 
     // Milestone indicator
-    if (this.displayCombo % 50 === 0 && timeSinceIncrease < 500) {
-      const milestoneAlpha = 1 - timeSinceIncrease / 500;
-      this.ctx.globalAlpha = milestoneAlpha;
-      this.ctx.font = 'bold 20px -apple-system, sans-serif';
-      this.ctx.fillStyle = '#ffdd00';
-      this.ctx.fillText('★ MILESTONE ★', centerX, centerY - 50);
-    }
+    this.drawMilestoneIndicator(centerX, centerY, timeSinceIncrease);
 
     this.ctx.restore();
+  }
+
+  /**
+   * Draw milestone indicator when combo hits multiples of 50
+   */
+  private drawMilestoneIndicator(centerX: number, centerY: number, timeSinceIncrease: number): void {
+    if (this.displayCombo % 50 !== 0 || timeSinceIncrease >= 500) return;
+
+    const milestoneAlpha = 1 - timeSinceIncrease / 500;
+    this.ctx.globalAlpha = milestoneAlpha;
+    this.ctx.font = 'bold 20px -apple-system, sans-serif';
+    this.ctx.fillStyle = '#ffdd00';
+    this.ctx.fillText('★ MILESTONE ★', centerX, centerY - 50);
   }
 
   /**
