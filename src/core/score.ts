@@ -1,5 +1,5 @@
 import type { JudgmentGrade, LetterGrade, Judgment, ResultsData, Song, Chart } from '../types';
-import { JUDGMENT_SCORES, JUDGMENT_MAINTAINS_COMBO, GRADE_THRESHOLDS } from '../types';
+import { JUDGMENT_SCORES, JUDGMENT_MAINTAINS_COMBO, JUDGMENT_HEALTH, GRADE_THRESHOLDS } from '../types';
 
 // ============================================================================
 // Constants
@@ -8,6 +8,9 @@ import { JUDGMENT_SCORES, JUDGMENT_MAINTAINS_COMBO, GRADE_THRESHOLDS } from '../
 const MAX_SCORE = 1_000_000;
 const COMBO_MULTIPLIER_THRESHOLDS = [10, 20, 30]; // Combo thresholds for multiplier increases
 const MAX_MULTIPLIER = 4;
+const INITIAL_HEALTH = 50; // Start at 50%
+const MAX_HEALTH = 100;
+const MIN_HEALTH = 0;
 
 // ============================================================================
 // Score State
@@ -28,6 +31,10 @@ export interface ScoreState {
   totalJudged: number;
   /** Total notes in chart */
   totalNotes: number;
+  /** Current health (0-100) */
+  health: number;
+  /** Whether player has failed (health reached 0) */
+  failed: boolean;
 }
 
 /**
@@ -49,6 +56,8 @@ export function createScoreState(totalNotes: number): ScoreState {
     },
     totalJudged: 0,
     totalNotes,
+    health: INITIAL_HEALTH,
+    failed: false,
   };
 }
 
@@ -77,6 +86,7 @@ export function applyJudgment(state: ScoreState, judgment: Judgment): ScoreState
   const { grade } = judgment;
   const scoreValue = JUDGMENT_SCORES[grade];
   const maintainsCombo = JUDGMENT_MAINTAINS_COMBO[grade];
+  const healthChange = JUDGMENT_HEALTH[grade];
 
   // Calculate new combo
   const newCombo = maintainsCombo ? state.combo + 1 : 0;
@@ -90,6 +100,10 @@ export function applyJudgment(state: ScoreState, judgment: Judgment): ScoreState
   const newCounts = { ...state.judgmentCounts };
   newCounts[grade]++;
 
+  // Update health (clamp between 0 and 100)
+  const newHealth = Math.max(MIN_HEALTH, Math.min(MAX_HEALTH, state.health + healthChange));
+  const hasFailed = newHealth <= MIN_HEALTH;
+
   return {
     rawScore: state.rawScore + scoreGain,
     maxPossibleScore: state.maxPossibleScore + 100 * MAX_MULTIPLIER,
@@ -98,6 +112,8 @@ export function applyJudgment(state: ScoreState, judgment: Judgment): ScoreState
     judgmentCounts: newCounts,
     totalJudged: state.totalJudged + 1,
     totalNotes: state.totalNotes,
+    health: newHealth,
+    failed: state.failed || hasFailed,
   };
 }
 

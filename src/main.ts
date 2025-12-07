@@ -1,4 +1,5 @@
-import type { Song, Chart, GameScreen, ResultsData } from './types';
+import type { Song, Chart, GameScreen, ResultsData, Settings } from './types';
+import { DEFAULT_SETTINGS } from './types';
 import { audioManager } from './audio';
 import { GameController } from './core/game';
 import { loadAllSongs, createDemoSong } from './core/loader';
@@ -22,6 +23,7 @@ class App {
   private songs: Song[] = [];
   private lastPlayedSong: Song | null = null;
   private lastPlayedChart: Chart | null = null;
+  private currentSettings: Settings = { ...DEFAULT_SETTINGS };
 
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -34,7 +36,7 @@ class App {
 
     // Initialize screens
     this.songSelectScreen = new SongSelectScreen(this.uiContainer, {
-      onSongSelect: (song, chart) => this.startGame(song, chart),
+      onSongSelect: (song, chart, settings) => this.startGame(song, chart, settings),
     });
 
     this.resultsScreen = new ResultsScreen(this.uiContainer, {
@@ -128,18 +130,23 @@ class App {
   /**
    * Start a game
    */
-  private async startGame(song: Song, chart: Chart): Promise<void> {
+  private async startGame(song: Song, chart: Chart, settings?: Partial<Settings>): Promise<void> {
     this.currentScreen = 'gameplay';
     this.lastPlayedSong = song;
     this.lastPlayedChart = chart;
+
+    // Merge settings
+    if (settings) {
+      this.currentSettings = { ...this.currentSettings, ...settings };
+    }
 
     // Hide UI, show canvas
     this.songSelectScreen?.hide();
     this.uiContainer.classList.add('hidden');
     this.canvas.classList.remove('hidden');
 
-    // Create game controller
-    this.gameController = new GameController(this.canvas);
+    // Create game controller with settings
+    this.gameController = new GameController(this.canvas, this.currentSettings);
 
     // Listen for game events
     this.gameController.addEventListener((event) => {
@@ -187,7 +194,15 @@ class App {
     if (this.currentScreen === 'gameplay' && this.gameController) {
       if (e.code === 'Escape') {
         e.preventDefault();
-        this.gameController.togglePause();
+        if (this.gameController.isPaused()) {
+          // Already paused - quit to menu
+          this.gameController.stop();
+          this.gameController = null;
+          this.showSongSelect();
+        } else {
+          // Playing - pause the game
+          this.gameController.pause();
+        }
       } else if (e.code === 'Enter' && this.gameController.isPaused()) {
         e.preventDefault();
         this.gameController.resume();

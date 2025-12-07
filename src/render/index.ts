@@ -19,12 +19,12 @@ export const THEME = {
     secondary: '#a0a0b0',
     muted: '#606070',
   },
-  // Arrow colors by direction
+  // Arrow colors by direction (classic DDR style)
   arrows: {
-    left: '#ff3366',    // Pink/Red
-    down: '#00ccff',    // Cyan
-    up: '#00ff88',      // Green
-    right: '#ffaa00',   // Orange
+    left: '#c850c0',    // Magenta/Pink
+    down: '#4fc3f7',    // Light Blue
+    up: '#66bb6a',      // Green
+    right: '#ff7043',   // Orange/Red
   },
   // Judgment colors
   judgment: {
@@ -51,15 +51,15 @@ export const THEME = {
 
 export const LAYOUT = {
   /** Distance from top where receptors sit (as fraction of canvas height) */
-  receptorY: 0.15,
+  receptorY: 0.12,
   /** Arrow size in pixels */
-  arrowSize: 64,
+  arrowSize: 80,
   /** Gap between arrow columns */
-  arrowGap: 8,
+  arrowGap: 4,
   /** Scroll speed: pixels per millisecond */
-  scrollSpeed: 0.6,
+  scrollSpeed: 0.5,
   /** How far ahead to render notes (in ms) */
-  lookAhead: 2000,
+  lookAhead: 2500,
   /** Receptor glow duration on press (ms) */
   receptorGlowDuration: 100,
 } as const;
@@ -164,13 +164,28 @@ export class Renderer {
    * Draw the lane backgrounds
    */
   drawLanes(): void {
-    const laneWidth = LAYOUT.arrowSize + 4;
+    const laneWidth = LAYOUT.arrowSize;
 
     this.ctx.fillStyle = THEME.bg.secondary;
 
     for (const dir of DIRECTIONS) {
       const x = this.columnX[dir] - laneWidth / 2;
       this.ctx.fillRect(x, 0, laneWidth, this.height);
+    }
+
+    // Draw subtle lane separators
+    this.ctx.strokeStyle = THEME.bg.tertiary;
+    this.ctx.lineWidth = 1;
+    for (const dir of DIRECTIONS) {
+      const x = this.columnX[dir] - laneWidth / 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(x, 0);
+      this.ctx.lineTo(x, this.height);
+      this.ctx.stroke();
+      this.ctx.beginPath();
+      this.ctx.moveTo(x + laneWidth, 0);
+      this.ctx.lineTo(x + laneWidth, this.height);
+      this.ctx.stroke();
     }
   }
 
@@ -212,7 +227,7 @@ export class Renderer {
   }
 
   /**
-   * Draw a single arrow
+   * Draw a single arrow - simple, large, easy to see
    */
   drawArrow(
     x: number,
@@ -227,74 +242,133 @@ export class Renderer {
     this.ctx.save();
     this.ctx.translate(x, y);
 
-    // Rotate based on direction
+    // Rotate based on direction (arrow points up by default)
     const rotations: Record<Direction, number> = {
-      left: Math.PI,
-      down: Math.PI / 2,
-      up: -Math.PI / 2,
-      right: 0,
+      up: 0,
+      down: Math.PI,
+      left: -Math.PI / 2,
+      right: Math.PI / 2,
     };
     this.ctx.rotate(rotations[direction]);
 
     this.ctx.globalAlpha = alpha;
 
-    // Draw arrow shape (pointing right by default)
-    const halfSize = size / 2;
-    const innerSize = size * 0.3;
+    const s = size / 2;
 
-    this.ctx.beginPath();
+    // Simple large arrow shape - maximum coverage
+    const drawArrowShape = () => {
+      this.ctx.beginPath();
+      // Top point
+      this.ctx.moveTo(0, -s * 0.95);
+      // Right side of arrow head
+      this.ctx.lineTo(s * 0.95, s * 0.1);
+      // Inner corner right
+      this.ctx.lineTo(s * 0.35, s * 0.1);
+      // Right side of stem
+      this.ctx.lineTo(s * 0.35, s * 0.95);
+      // Bottom of stem
+      this.ctx.lineTo(-s * 0.35, s * 0.95);
+      // Left side of stem
+      this.ctx.lineTo(-s * 0.35, s * 0.1);
+      // Inner corner left
+      this.ctx.lineTo(-s * 0.95, s * 0.1);
+      this.ctx.closePath();
+    };
 
     if (isReceptor) {
-      // Receptor: outline only
-      this.ctx.strokeStyle = color;
+      // Receptor: dark with colored outline when active
+      if (alpha > 0.5) {
+        this.ctx.shadowColor = color;
+        this.ctx.shadowBlur = 15;
+      }
+
+      this.ctx.fillStyle = '#151518';
+      drawArrowShape();
+      this.ctx.fill();
+
+      this.ctx.shadowBlur = 0;
+
+      this.ctx.strokeStyle = alpha > 0.5 ? color : '#3a3a45';
       this.ctx.lineWidth = 3;
-
-      // Arrow outline
-      this.ctx.moveTo(halfSize, 0);
-      this.ctx.lineTo(0, -halfSize);
-      this.ctx.lineTo(0, -innerSize);
-      this.ctx.lineTo(-halfSize + innerSize, -innerSize);
-      this.ctx.lineTo(-halfSize + innerSize, innerSize);
-      this.ctx.lineTo(0, innerSize);
-      this.ctx.lineTo(0, halfSize);
-      this.ctx.closePath();
-
+      this.ctx.lineJoin = 'miter';
       this.ctx.stroke();
+
     } else {
-      // Note: filled
-      this.ctx.fillStyle = color;
+      // Note arrow
 
-      // Arrow shape
-      this.ctx.moveTo(halfSize, 0);
-      this.ctx.lineTo(0, -halfSize);
-      this.ctx.lineTo(0, -innerSize);
-      this.ctx.lineTo(-halfSize + innerSize, -innerSize);
-      this.ctx.lineTo(-halfSize + innerSize, innerSize);
-      this.ctx.lineTo(0, innerSize);
-      this.ctx.lineTo(0, halfSize);
-      this.ctx.closePath();
+      // Dark outline
+      this.ctx.strokeStyle = '#000000';
+      this.ctx.lineWidth = 4;
+      this.ctx.lineJoin = 'miter';
+      drawArrowShape();
+      this.ctx.stroke();
 
+      // Main gradient fill
+      const gradient = this.ctx.createLinearGradient(0, -s, 0, s);
+      gradient.addColorStop(0, this.lightenColor(color, 35));
+      gradient.addColorStop(0.5, color);
+      gradient.addColorStop(1, this.darkenColor(color, 20));
+
+      this.ctx.fillStyle = gradient;
+      drawArrowShape();
       this.ctx.fill();
 
-      // Add inner highlight
-      this.ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      this.ctx.beginPath();
-      this.ctx.moveTo(halfSize * 0.6, 0);
-      this.ctx.lineTo(0, -halfSize * 0.5);
-      this.ctx.lineTo(0, halfSize * 0.5);
-      this.ctx.closePath();
-      this.ctx.fill();
+      // White inner outline
+      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      this.ctx.lineWidth = 2;
+      this.ctx.save();
+      this.ctx.scale(0.85, 0.85);
+      drawArrowShape();
+      this.ctx.restore();
+      this.ctx.stroke();
     }
 
     this.ctx.restore();
   }
 
   /**
-   * Draw all notes
+   * Lighten a hex color
    */
-  drawNotes(notes: Note[], currentTime: number, scrollSpeed: number): void {
-    // Only draw notes within visible range
-    const lookAhead = LAYOUT.lookAhead / scrollSpeed;
+  private lightenColor(hex: string, percent: number): string {
+    const num = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, (num >> 16) + Math.round(255 * percent / 100));
+    const g = Math.min(255, ((num >> 8) & 0x00FF) + Math.round(255 * percent / 100));
+    const b = Math.min(255, (num & 0x0000FF) + Math.round(255 * percent / 100));
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  /**
+   * Darken a hex color
+   */
+  private darkenColor(hex: string, percent: number): string {
+    const num = parseInt(hex.slice(1), 16);
+    const r = Math.max(0, (num >> 16) - Math.round(255 * percent / 100));
+    const g = Math.max(0, ((num >> 8) & 0x00FF) - Math.round(255 * percent / 100));
+    const b = Math.max(0, (num & 0x0000FF) - Math.round(255 * percent / 100));
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  /**
+   * Draw all notes
+   * @param cmod - CMod speed in pixels/second (0 = use BPM-based)
+   * @param bpm - BPM for BPM-based scrolling (when cmod is 0)
+   */
+  drawNotes(notes: Note[], currentTime: number, cmod: number = 500, bpm: number = 120): void {
+    // Calculate pixels per millisecond
+    // CMod 500 = 500 pixels/second = 0.5 pixels/ms
+    // When cmod is 0, derive speed from BPM (4 beats visible on screen)
+    let pixelsPerMs: number;
+    if (cmod === 0) {
+      // BPM-based: aim for ~4 beats visible on screen
+      const msPerBeat = 60000 / bpm;
+      const beatsVisible = 4;
+      pixelsPerMs = (this.height - this.receptorY) / (msPerBeat * beatsVisible);
+    } else {
+      pixelsPerMs = cmod / 1000;
+    }
+
+    // Calculate look-ahead time based on screen height
+    const lookAheadMs = this.height / pixelsPerMs;
 
     for (const note of notes) {
       if (note.judged) continue;
@@ -302,12 +376,12 @@ export class Renderer {
       const timeDiff = note.time - currentTime;
 
       // Skip notes that are too far ahead or behind
-      if (timeDiff > lookAhead) continue;
+      if (timeDiff > lookAheadMs) continue;
       if (timeDiff < -500) continue; // Allow some time for miss animation
 
       // Calculate Y position
-      // Positive timeDiff = note is below receptor (approaching)
-      const y = this.receptorY + timeDiff * LAYOUT.scrollSpeed * scrollSpeed;
+      // Positive timeDiff = note is below receptor (approaching from bottom)
+      const y = this.receptorY + timeDiff * pixelsPerMs;
 
       // Skip if off screen
       if (y < -LAYOUT.arrowSize || y > this.height + LAYOUT.arrowSize) continue;
@@ -455,10 +529,10 @@ export class Renderer {
     this.ctx.fillStyle = THEME.text.primary;
     this.ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 30);
 
-    this.ctx.font = '20px -apple-system, sans-serif';
+    this.ctx.font = '18px -apple-system, sans-serif';
     this.ctx.fillStyle = THEME.text.secondary;
-    this.ctx.fillText('Press ENTER to resume', this.width / 2, this.height / 2 + 20);
-    this.ctx.fillText('Press ESCAPE to quit', this.width / 2, this.height / 2 + 50);
+    this.ctx.fillText('ENTER - Resume', this.width / 2, this.height / 2 + 25);
+    this.ctx.fillText('ESCAPE - Quit to menu', this.width / 2, this.height / 2 + 55);
 
     this.ctx.restore();
   }
@@ -479,21 +553,124 @@ export class Renderer {
   /**
    * Full render frame for gameplay
    */
-  renderGameplay(state: GameplayState, currentTime: number, heldDirections: Set<Direction>): void {
+  renderGameplay(state: GameplayState, currentTime: number, heldDirections: Set<Direction>, cmod: number = 500, health: number = 50): void {
     this.clear();
     this.drawLanes();
     this.drawReceptors(currentTime, heldDirections);
-    this.drawNotes(state.activeNotes, currentTime, 1); // TODO: use settings scroll speed
+    this.drawNotes(state.activeNotes, currentTime, cmod, state.song.bpm);
     this.drawJudgment(currentTime);
     this.setCombo(state.combo);
     this.drawCombo();
     this.drawScore(state.score);
+    this.drawHealthBar(health);
+    this.drawCmodIndicator(cmod, state.song.bpm);
     this.drawProgress(currentTime, state.song.charts[0]?.notes.length ?
       state.chart.notes[state.chart.notes.length - 1]?.time ?? 0 : 0);
 
     if (state.paused) {
       this.drawPauseOverlay();
     }
+  }
+
+  /**
+   * Draw CMod indicator
+   */
+  drawCmodIndicator(cmod: number, bpm: number = 120): void {
+    this.ctx.save();
+    this.ctx.font = 'bold 14px -apple-system, sans-serif';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'top';
+    this.ctx.fillStyle = THEME.text.secondary;
+    // Show "BPM" when cmod is 0, otherwise show "C{speed}"
+    const label = cmod === 0 ? `${bpm} BPM` : `C${cmod}`;
+    this.ctx.fillText(label, 20, 35);
+    this.ctx.restore();
+  }
+
+  /**
+   * Draw health bar (vertical bar on the left side)
+   */
+  drawHealthBar(health: number): void {
+    const barWidth = 16;
+    const barHeight = this.height * 0.4;
+    const x = 15;
+    const y = this.height * 0.3;
+    const radius = 4;
+
+    // Background
+    this.ctx.fillStyle = THEME.bg.tertiary;
+    this.roundRect(x, y, barWidth, barHeight, radius);
+    this.ctx.fill();
+
+    // Health fill (from bottom up)
+    const fillHeight = (health / 100) * barHeight;
+    const fillY = y + barHeight - fillHeight;
+
+    // Color based on health level
+    let healthColor: string;
+    if (health > 60) {
+      healthColor = '#00ff88'; // Green
+    } else if (health > 30) {
+      healthColor = '#ffaa00'; // Orange
+    } else {
+      healthColor = '#ff4444'; // Red
+    }
+
+    // Create gradient for health bar
+    const gradient = this.ctx.createLinearGradient(x, fillY, x, fillY + fillHeight);
+    gradient.addColorStop(0, this.lightenColor(healthColor, 20));
+    gradient.addColorStop(1, healthColor);
+
+    this.ctx.fillStyle = gradient;
+
+    // Draw filled portion with rounded bottom corners
+    this.ctx.beginPath();
+    if (fillHeight >= radius * 2) {
+      // Full rounded corners at bottom
+      this.ctx.moveTo(x + radius, fillY);
+      this.ctx.lineTo(x + barWidth - radius, fillY);
+      this.ctx.lineTo(x + barWidth - radius, fillY + fillHeight - radius);
+      this.ctx.quadraticCurveTo(x + barWidth, fillY + fillHeight, x + barWidth - radius, fillY + fillHeight);
+      this.ctx.lineTo(x + radius, fillY + fillHeight);
+      this.ctx.quadraticCurveTo(x, fillY + fillHeight, x, fillY + fillHeight - radius);
+      this.ctx.lineTo(x, fillY);
+    } else {
+      // Simple rect for small amounts
+      this.ctx.rect(x, fillY, barWidth, fillHeight);
+    }
+    this.ctx.fill();
+
+    // Border
+    this.ctx.strokeStyle = THEME.text.muted;
+    this.ctx.lineWidth = 1;
+    this.roundRect(x, y, barWidth, barHeight, radius);
+    this.ctx.stroke();
+
+    // 50% marker line
+    const markerY = y + barHeight * 0.5;
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x, markerY);
+    this.ctx.lineTo(x + barWidth, markerY);
+    this.ctx.stroke();
+  }
+
+  /**
+   * Helper to draw rounded rectangle
+   */
+  private roundRect(x: number, y: number, w: number, h: number, r: number): void {
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + r, y);
+    this.ctx.lineTo(x + w - r, y);
+    this.ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    this.ctx.lineTo(x + w, y + h - r);
+    this.ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    this.ctx.lineTo(x + r, y + h);
+    this.ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    this.ctx.lineTo(x, y + r);
+    this.ctx.quadraticCurveTo(x, y, x + r, y);
+    this.ctx.closePath();
   }
 
   /**

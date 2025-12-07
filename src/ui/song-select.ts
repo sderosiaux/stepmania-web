@@ -1,12 +1,13 @@
-import type { Song, Chart, Difficulty } from '../types';
+import type { Song, Chart, Settings } from '../types';
 import { THEME } from '../render';
+import { CMOD_OPTIONS, DEFAULT_SETTINGS } from '../types';
 
 // ============================================================================
 // Song Select Screen
 // ============================================================================
 
 export interface SongSelectCallbacks {
-  onSongSelect: (song: Song, chart: Chart) => void;
+  onSongSelect: (song: Song, chart: Chart, settings: Partial<Settings>) => void;
   onBack?: () => void;
 }
 
@@ -15,6 +16,7 @@ export class SongSelectScreen {
   private songs: Song[] = [];
   private selectedIndex: number = 0;
   private selectedDifficultyIndex: number = 0;
+  private selectedCmodIndex: number = CMOD_OPTIONS.indexOf(DEFAULT_SETTINGS.cmod as typeof CMOD_OPTIONS[number]);
   private callbacks: SongSelectCallbacks;
   private boundKeyHandler: (e: KeyboardEvent) => void;
 
@@ -89,7 +91,8 @@ export class SongSelectScreen {
         if (song) {
           const chart = song.charts[this.selectedDifficultyIndex];
           if (chart) {
-            this.callbacks.onSongSelect(song, chart);
+            const cmod = CMOD_OPTIONS[this.selectedCmodIndex] ?? DEFAULT_SETTINGS.cmod;
+            this.callbacks.onSongSelect(song, chart, { cmod });
           }
         }
         break;
@@ -97,6 +100,18 @@ export class SongSelectScreen {
       case 'Escape':
         e.preventDefault();
         this.callbacks.onBack?.();
+        break;
+
+      case 'Tab':
+        e.preventDefault();
+        if (e.shiftKey) {
+          // Shift+Tab: decrease CMod
+          this.selectedCmodIndex = Math.max(0, this.selectedCmodIndex - 1);
+        } else {
+          // Tab: increase CMod
+          this.selectedCmodIndex = Math.min(CMOD_OPTIONS.length - 1, this.selectedCmodIndex + 1);
+        }
+        this.render();
         break;
     }
   }
@@ -117,11 +132,7 @@ export class SongSelectScreen {
 
         ${selectedSong ? this.renderSongDetails(selectedSong) : ''}
 
-        <div class="controls-hint">
-          <span><kbd>↑</kbd><kbd>↓</kbd> Select Song</span>
-          <span><kbd>←</kbd><kbd>→</kbd> Select Difficulty</span>
-          <span><kbd>ENTER</kbd> Start</span>
-        </div>
+        ${this.renderCmodSelector()}
       </div>
       <style>
         .song-select {
@@ -240,22 +251,6 @@ export class SongSelectScreen {
           margin-top: 0.25rem;
         }
 
-        .controls-hint {
-          display: flex;
-          gap: 2rem;
-          color: ${THEME.text.secondary};
-          font-size: 0.85rem;
-        }
-
-        .controls-hint kbd {
-          display: inline-block;
-          padding: 0.2rem 0.5rem;
-          background: ${THEME.bg.tertiary};
-          border-radius: 4px;
-          margin-right: 0.25rem;
-          font-family: inherit;
-        }
-
         .empty-state {
           text-align: center;
           padding: 3rem;
@@ -276,6 +271,53 @@ export class SongSelectScreen {
           font-size: 0.85rem;
           text-align: left;
         }
+
+        .cmod-selector {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          margin-bottom: 2rem;
+          padding: 0.75rem 1.25rem;
+          background: ${THEME.bg.secondary};
+          border-radius: 8px;
+        }
+
+        .cmod-selector .label {
+          font-size: 0.9rem;
+          color: ${THEME.text.secondary};
+          font-weight: 500;
+        }
+
+        .cmod-options {
+          display: flex;
+          gap: 0.25rem;
+        }
+
+        .cmod-option {
+          padding: 0.4rem 0.6rem;
+          background: ${THEME.bg.tertiary};
+          border-radius: 4px;
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: ${THEME.text.secondary};
+          border: 2px solid transparent;
+          transition: all 0.15s ease;
+          cursor: pointer;
+        }
+
+        .cmod-option:hover {
+          background: ${THEME.bg.primary};
+        }
+
+        .cmod-option.selected {
+          border-color: ${THEME.accent.primary};
+          background: rgba(0, 212, 255, 0.15);
+          color: ${THEME.accent.primary};
+        }
+
+        .cmod-option.off {
+          font-style: italic;
+        }
       </style>
     `;
 
@@ -294,14 +336,16 @@ export class SongSelectScreen {
       item.addEventListener('click', () => {
         this.selectedDifficultyIndex = index;
         this.render();
+      });
+    });
 
-        // Double click to start
-        if (selectedSong) {
-          const chart = selectedSong.charts[index];
-          if (chart) {
-            this.callbacks.onSongSelect(selectedSong, chart);
-          }
-        }
+    // CMod click handlers
+    const cmodItems = this.container.querySelectorAll('.cmod-option');
+    cmodItems.forEach((item) => {
+      item.addEventListener('click', () => {
+        const index = parseInt((item as HTMLElement).dataset.cmodIndex ?? '0', 10);
+        this.selectedCmodIndex = index;
+        this.render();
       });
     });
   }
@@ -360,6 +404,26 @@ songs/my-song/<br>
             `
             )
             .join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Render CMod speed selector
+   */
+  private renderCmodSelector(): string {
+    return `
+      <div class="cmod-selector">
+        <span class="label">Speed:</span>
+        <div class="cmod-options">
+          ${CMOD_OPTIONS.map(
+            (cmod, index) => `
+            <div class="cmod-option ${index === this.selectedCmodIndex ? 'selected' : ''} ${cmod === 0 ? 'off' : ''}" data-cmod-index="${index}">
+              ${cmod === 0 ? 'BPM' : `C${cmod}`}
+            </div>
+          `
+          ).join('')}
         </div>
       </div>
     `;

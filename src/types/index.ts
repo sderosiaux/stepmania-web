@@ -10,10 +10,16 @@ export const DIRECTIONS: readonly Direction[] = ['left', 'down', 'up', 'right'] 
 
 /** Map keyboard keys to directions */
 export const KEY_TO_DIRECTION: Record<string, Direction> = {
+  // Arrow keys
   ArrowLeft: 'left',
   ArrowDown: 'down',
   ArrowUp: 'up',
   ArrowRight: 'right',
+  // SDKL keys (split keyboard layout)
+  KeyS: 'left',
+  KeyD: 'down',
+  KeyK: 'up',
+  KeyL: 'right',
 };
 
 /** Difficulty levels */
@@ -55,6 +61,16 @@ export const JUDGMENT_MAINTAINS_COMBO: Record<JudgmentGrade, boolean> = {
   good: true,
   boo: false,
   miss: false,
+};
+
+/** Health change for each judgment (positive = gain, negative = lose) */
+export const JUDGMENT_HEALTH: Record<JudgmentGrade, number> = {
+  marvelous: 0.8,
+  perfect: 0.6,
+  great: 0.2,
+  good: -1.0,
+  boo: -3.0,
+  miss: -5.0,
 };
 
 /** Grade thresholds (percentage required) */
@@ -198,16 +214,22 @@ export interface Settings {
   audioOffset: number;
   /** Visual offset in ms (positive = arrows appear later) */
   visualOffset: number;
-  /** Scroll speed multiplier */
+  /** Scroll speed multiplier (legacy, used if cmod is 0) */
   scrollSpeed: number;
+  /** CMod speed - constant scroll speed in pixels/second (0 = use BPM-based) */
+  cmod: number;
   /** Background dim (0-1) */
   backgroundDim: number;
 }
+
+/** Available CMod speeds */
+export const CMOD_OPTIONS = [0, 300, 400, 500, 600, 700, 800, 900, 1000] as const;
 
 /** Default settings */
 export const DEFAULT_SETTINGS: Settings = {
   audioOffset: 0,
   visualOffset: 0,
   scrollSpeed: 1,
+  cmod: 500, // Default to C500
   backgroundDim: 0.8,
 };

@@ -61,22 +61,22 @@ export function createDemoSong(): Song {
     id: 'demo',
     title: 'Demo Song',
     artist: 'StepMania Web',
-    bpm: 120,
+    bpm: 100,
     offset: 0,
     musicFile: 'silence.mp3',
     previewStart: 0,
     charts: [
       {
         difficulty: 'Easy',
-        level: 3,
-        notes: generateDemoNotes(120, 16), // 16 measures
+        level: 1,
+        notes: generateDemoNotes(100, 8), // 8 measures, slower
       },
     ],
   };
 }
 
 /**
- * Generate demo notes for testing
+ * Generate demo notes for testing - simple pattern
  */
 function generateDemoNotes(bpm: number, measures: number): import('../types').Note[] {
   const notes: import('../types').Note[] = [];
@@ -86,59 +86,15 @@ function generateDemoNotes(bpm: number, measures: number): import('../types').No
   let noteId = 0;
 
   for (let measure = 0; measure < measures; measure++) {
-    // Quarter notes for first few measures
-    if (measure < 4) {
-      for (let beat = 0; beat < 4; beat++) {
-        const time = (measure * 4 + beat) * msPerBeat;
-        notes.push({
-          id: noteId++,
-          time,
-          direction: directions[beat % 4]!,
-          judged: false,
-        });
-      }
-    }
-    // Eighth notes for middle measures
-    else if (measure < 12) {
-      for (let eighth = 0; eighth < 8; eighth++) {
-        const time = (measure * 4 + eighth * 0.5) * msPerBeat;
-        notes.push({
-          id: noteId++,
-          time,
-          direction: directions[eighth % 4]!,
-          judged: false,
-        });
-      }
-    }
-    // Add some jumps in later measures
-    else {
-      for (let beat = 0; beat < 4; beat++) {
-        const time = (measure * 4 + beat) * msPerBeat;
-
-        if (beat % 2 === 0) {
-          // Jump
-          notes.push({
-            id: noteId++,
-            time,
-            direction: 'left',
-            judged: false,
-          });
-          notes.push({
-            id: noteId++,
-            time,
-            direction: 'right',
-            judged: false,
-          });
-        } else {
-          // Single
-          notes.push({
-            id: noteId++,
-            time,
-            direction: directions[beat]!,
-            judged: false,
-          });
-        }
-      }
+    // Simple quarter notes only - one arrow per beat, cycling through directions
+    for (let beat = 0; beat < 4; beat++) {
+      const time = (measure * 4 + beat) * msPerBeat;
+      notes.push({
+        id: noteId++,
+        time,
+        direction: directions[(measure + beat) % 4]!,
+        judged: false,
+      });
     }
   }
 

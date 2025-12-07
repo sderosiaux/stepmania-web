@@ -38,6 +38,9 @@ export class GameController {
   /** Audio start offset for sync */
   private audioStartOffset: number = 0;
 
+  /** Preparation time before first note (ms) - lets arrows scroll up from bottom */
+  private readonly PREP_TIME: number = 3000;
+
   /** Is game running */
   private running: boolean = false;
 
@@ -50,6 +53,9 @@ export class GameController {
     count: 3,
     startTime: 0,
   };
+
+  /** Whether audio is available for this song */
+  private hasAudio: boolean = false;
 
   constructor(canvas: HTMLCanvasElement, settings: Settings = DEFAULT_SETTINGS) {
     this.renderer = new Renderer(canvas);
@@ -86,9 +92,16 @@ export class GameController {
    * Start a new game with the given song and chart
    */
   async start(song: Song, chart: Chart): Promise<void> {
-    // Load audio
-    const audioPath = `songs/${song.id}/${song.musicFile}`;
-    await audioManager.load(audioPath);
+    // Try to load audio (may fail for demo songs)
+    this.hasAudio = false;
+    try {
+      const audioPath = `songs/${song.id}/${song.musicFile}`;
+      await audioManager.load(audioPath);
+      this.hasAudio = true;
+    } catch (error) {
+      console.warn('Audio not available, running in silent mode:', error);
+      this.hasAudio = false;
+    }
 
     // Create fresh notes array (clone to avoid mutating original)
     const activeNotes: Note[] = chart.notes.map((n) => ({ ...n, judged: false }));
@@ -141,7 +154,9 @@ export class GameController {
       this.renderer.renderGameplay(
         this.state,
         this.getCurrentGameTime(),
-        new Set(inputManager.getHeldDirections())
+        new Set(inputManager.getHeldDirections()),
+        this.settings.cmod,
+        this.scoreState?.health ?? 50
       );
       this.frameId = requestAnimationFrame(this.loop.bind(this));
       return;
@@ -168,7 +183,9 @@ export class GameController {
     this.renderer.renderGameplay(
       this.state,
       currentTime,
-      new Set(inputManager.getHeldDirections())
+      new Set(inputManager.getHeldDirections()),
+      this.settings.cmod,
+      this.scoreState?.health ?? 50
     );
 
     // Continue loop
@@ -187,13 +204,20 @@ export class GameController {
     const currentCount = 3 - Math.floor(elapsed / countdownDuration);
 
     if (currentCount <= 0) {
-      // Countdown finished, start the song
+      // Countdown finished, start the preparation phase
       this.countdown.active = false;
       this.gameStartTime = performance.now();
-      this.audioStartOffset = this.state!.song.offset + this.settings.audioOffset;
+      // Add prep time offset so game time starts negative, giving notes time to scroll up
+      this.audioStartOffset = this.state!.song.offset + this.settings.audioOffset - this.PREP_TIME;
 
-      // Start audio with offset
-      audioManager.play(Math.max(0, -this.audioStartOffset / 1000));
+      // Delay audio start by prep time (only if audio is available)
+      if (this.hasAudio) {
+        setTimeout(() => {
+          if (this.running && !this.state?.paused) {
+            audioManager.play(Math.max(0, -this.state!.song.offset / 1000));
+          }
+        }, this.PREP_TIME);
+      }
     } else {
       this.countdown.count = currentCount;
     }
@@ -209,14 +233,14 @@ export class GameController {
    * Get current game time in milliseconds
    */
   private getCurrentGameTime(): number {
-    if (this.countdown.active) return -1000;
+    if (this.countdown.active) return -this.PREP_TIME - 1000;
 
-    // Use audio time as master clock when playing
-    if (audioManager.isPlaying) {
-      return audioManager.getCurrentTimeMs() * 1000 + this.audioStartOffset;
+    // Use audio time as master clock when playing (if audio is available)
+    if (this.hasAudio && audioManager.isPlaying) {
+      return audioManager.getCurrentTimeMs() + this.audioStartOffset;
     }
 
-    // Fallback to performance timing
+    // Fallback to performance timing (always used in silent mode)
     return performance.now() - this.gameStartTime + this.audioStartOffset;
   }
 
@@ -325,9 +349,12 @@ export class GameController {
     const lastNote = this.state.activeNotes[this.state.activeNotes.length - 1];
     const pastLastNote = lastNote ? currentTime > lastNote.time + 2000 : true;
 
-    // Check if audio has ended
-    const audioDuration = audioManager.getDurationMs();
-    const pastAudioEnd = audioDuration > 0 && currentTime > audioDuration + 1000;
+    // Check if audio has ended (only if we have audio)
+    let pastAudioEnd = false;
+    if (this.hasAudio) {
+      const audioDuration = audioManager.getDurationMs();
+      pastAudioEnd = audioDuration > 0 && currentTime > audioDuration + 1000;
+    }
 
     if ((allJudged && pastLastNote) || pastAudioEnd) {
       this.endSong();
@@ -341,7 +368,9 @@ export class GameController {
     if (!this.state || this.state.ended) return;
 
     this.state.ended = true;
-    audioManager.stop();
+    if (this.hasAudio) {
+      audioManager.stop();
+    }
     inputManager.stop();
     this.running = false;
 
@@ -355,7 +384,9 @@ export class GameController {
     if (!this.state || this.state.paused || this.state.ended || this.countdown.active) return;
 
     this.state.paused = true;
-    audioManager.pause();
+    if (this.hasAudio) {
+      audioManager.pause();
+    }
     inputManager.clear();
 
     this.emit({ type: 'pause' });
@@ -403,7 +434,9 @@ export class GameController {
       this.frameId = null;
     }
 
-    audioManager.stop();
+    if (this.hasAudio) {
+      audioManager.stop();
+    }
     inputManager.stop();
 
     this.state = null;
