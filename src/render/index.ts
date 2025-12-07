@@ -870,22 +870,32 @@ export class Renderer {
   }
 
   /**
-   * Draw receptors (target arrows at top)
+   * Draw receptors (target arrows at top, or inclined for gems mode)
    */
   drawReceptors(currentTime: number, heldDirections: Set<Direction>): void {
+    const isGems = this.noteSkin === 'gems';
+
+    if (isGems) {
+      this.drawReceptors3D(currentTime, heldDirections);
+    } else {
+      this.drawReceptorsFlat(currentTime, heldDirections);
+    }
+  }
+
+  /**
+   * Draw flat receptors (DDR style)
+   */
+  private drawReceptorsFlat(currentTime: number, heldDirections: Set<Direction>): void {
     for (const dir of DIRECTIONS) {
       const x = this.columnX[dir];
       const y = this.receptorY;
 
-      // Check if glowing (recently pressed or held)
       const glowTime = this.receptorGlow[dir];
       const isGlowing =
         heldDirections.has(dir) || currentTime - glowTime < LAYOUT.receptorGlowDuration;
 
-      // Draw receptor
       this.drawArrow(x, y, dir, isGlowing ? 1 : 0.4, true);
 
-      // Draw glow effect
       if (isGlowing) {
         this.ctx.save();
         this.ctx.globalAlpha = 0.3;
@@ -895,6 +905,53 @@ export class Renderer {
         this.ctx.restore();
       }
     }
+  }
+
+  /**
+   * Draw 3D inclined receptors (Guitar Hero style)
+   */
+  private drawReceptors3D(currentTime: number, heldDirections: Set<Direction>): void {
+    const laneWidth = LAYOUT.arrowSize;
+    const scaleY = 0.75; // Vertical compression to simulate looking down at highway
+
+    for (const dir of DIRECTIONS) {
+      const x = this.columnX[dir];
+      const y = this.receptorY;
+
+      const glowTime = this.receptorGlow[dir];
+      const isGlowing =
+        heldDirections.has(dir) || currentTime - glowTime < LAYOUT.receptorGlowDuration;
+
+      this.ctx.save();
+
+      // Apply perspective transform centered on this receptor
+      this.ctx.translate(x, y);
+      this.ctx.scale(1, scaleY);
+      this.ctx.translate(-x, -y);
+
+      // Draw receptor with perspective
+      this.drawArrow(x, y, dir, isGlowing ? 1 : 0.4, true);
+
+      if (isGlowing) {
+        this.ctx.globalAlpha = 0.3;
+        this.ctx.shadowColor = THEME.arrows[dir];
+        this.ctx.shadowBlur = 20;
+        this.drawArrow(x, y, dir, 1, true);
+      }
+
+      this.ctx.restore();
+    }
+
+    // Draw a subtle "highway edge" line at receptor level
+    const firstLaneX = this.columnX.left - laneWidth / 2;
+    const lastLaneX = this.columnX.right + laneWidth / 2;
+
+    this.ctx.strokeStyle = 'rgba(100, 100, 140, 0.5)';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(firstLaneX, this.receptorY);
+    this.ctx.lineTo(lastLaneX, this.receptorY);
+    this.ctx.stroke();
   }
 
   /**
@@ -1166,9 +1223,10 @@ export class Renderer {
     // Calculate look-ahead time based on screen height
     const lookAheadMs = this.height / pixelsPerMs;
 
-    // Guitar Hero perspective settings
+    // Guitar Hero perspective settings (must match drawLanes3D)
     const vanishingPointY = isGems ? this.height * 0.35 : 0; // Where notes appear from
     const perspectiveRange = isGems ? (this.receptorY - vanishingPointY) : 0;
+    const horizonScale = 0.15; // Must match drawLanes3D
 
     // Draw hold notes first (so tap notes render on top)
     for (const note of notes) {
@@ -1203,18 +1261,20 @@ export class Renderer {
 
       if (isGems) {
         // Guitar Hero style: notes come from above (vanishing point) towards receptor at bottom
-        // Negative pixelsPerMs to reverse direction
         y = this.receptorY - timeDiff * pixelsPerMs;
 
         // Perspective scaling: notes get smaller as they're further from receptor
         if (y < this.receptorY && perspectiveRange > 0) {
           const distanceFromReceptor = this.receptorY - y;
           const normalizedDistance = Math.min(1, distanceFromReceptor / perspectiveRange);
-          scale = 1 - normalizedDistance * 0.6; // Scale from 1.0 (at receptor) to 0.4 (at vanishing point)
 
-          // Lane convergence: move notes towards center as they get further
+          // Scale from 1.0 (at receptor) to horizonScale (at vanishing point) - matches lane convergence
+          const perspectiveScale = 1 - normalizedDistance * (1 - horizonScale);
+          scale = perspectiveScale;
+
+          // Lane convergence: move notes towards center matching the lane edges
           const centerX = this.width / 2;
-          noteX = centerX + (noteX - centerX) * (1 - normalizedDistance * 0.5);
+          noteX = centerX + (noteX - centerX) * perspectiveScale;
         }
       } else {
         // DDR style: notes approach from below
@@ -1255,14 +1315,24 @@ export class Renderer {
     colorOverride?: string,
     scale: number = 1
   ): void {
-    if (scale === 1) {
+    const isGems = this.noteSkin === 'gems';
+
+    if (scale === 1 && !isGems) {
       this.drawArrow(x, y, direction, alpha, isReceptor, colorOverride);
       return;
     }
 
     this.ctx.save();
     this.ctx.translate(x, y);
-    this.ctx.scale(scale, scale);
+
+    if (isGems) {
+      // Apply perspective: horizontal scale + vertical compression (looking down at highway)
+      const scaleY = 0.75; // Match receptor compression
+      this.ctx.scale(scale, scale * scaleY);
+    } else {
+      this.ctx.scale(scale, scale);
+    }
+
     this.ctx.translate(-x, -y);
     this.drawArrow(x, y, direction, alpha, isReceptor, colorOverride);
     this.ctx.restore();
