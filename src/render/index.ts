@@ -1335,14 +1335,24 @@ export class Renderer {
     this.ctx.scale(scale, scale);
     this.ctx.translate(-centerX, -centerY);
 
+    // Enhanced shiny effect for combo > 50
+    const isShinyCombo = this.displayCombo > 50;
+
     // Glow effect for high combos
     if (this.displayCombo >= 20) {
       const glowIntensity = Math.min(1, (this.displayCombo - 20) / 50);
       const pulsePhase = (currentTime / 100) % (Math.PI * 2);
       const pulse = 0.5 + 0.5 * Math.sin(pulsePhase);
 
-      this.ctx.shadowColor = this.getComboColor(this.displayCombo);
-      this.ctx.shadowBlur = 20 + pulse * 15 * glowIntensity;
+      if (isShinyCombo) {
+        // Rainbow cycling glow for shiny combos
+        const hue = (currentTime / 10) % 360;
+        this.ctx.shadowColor = `hsl(${hue}, 100%, 60%)`;
+        this.ctx.shadowBlur = 30 + pulse * 25;
+      } else {
+        this.ctx.shadowColor = this.getComboColor(this.displayCombo);
+        this.ctx.shadowBlur = 20 + pulse * 15 * glowIntensity;
+      }
     }
 
     const text = `${this.displayCombo}`;
@@ -1362,7 +1372,23 @@ export class Renderer {
     const color = this.getComboColor(this.displayCombo);
 
     // Main text with gradient for high combos
-    if (this.displayCombo >= 50) {
+    if (isShinyCombo) {
+      // Rainbow shimmer gradient for shiny combos
+      const shimmerOffset = (currentTime / 5) % 200;
+      const gradient = this.ctx.createLinearGradient(
+        centerX - 60 + shimmerOffset, centerY - 30,
+        centerX + 60 + shimmerOffset, centerY + 30
+      );
+      const hue1 = (currentTime / 15) % 360;
+      const hue2 = (hue1 + 60) % 360;
+      const hue3 = (hue1 + 120) % 360;
+      const hue4 = (hue1 + 180) % 360;
+      gradient.addColorStop(0, `hsl(${hue1}, 100%, 70%)`);
+      gradient.addColorStop(0.33, `hsl(${hue2}, 100%, 70%)`);
+      gradient.addColorStop(0.66, `hsl(${hue3}, 100%, 70%)`);
+      gradient.addColorStop(1, `hsl(${hue4}, 100%, 70%)`);
+      this.ctx.fillStyle = gradient;
+    } else if (this.displayCombo >= 50) {
       const gradient = this.ctx.createLinearGradient(
         centerX - 50, centerY - 30,
         centerX + 50, centerY + 30
@@ -1385,9 +1411,19 @@ export class Renderer {
     this.ctx.globalAlpha = 1;
     this.ctx.shadowBlur = 0;
 
+    // Draw sparkles for shiny combos
+    if (isShinyCombo) {
+      this.drawComboSparkles(centerX, centerY, currentTime);
+    }
+
     // "COMBO" label with tier color
     this.ctx.font = 'bold 14px -apple-system, sans-serif';
-    this.ctx.fillStyle = color;
+    if (isShinyCombo) {
+      const hue = (currentTime / 15) % 360;
+      this.ctx.fillStyle = `hsl(${hue}, 100%, 70%)`;
+    } else {
+      this.ctx.fillStyle = color;
+    }
     this.ctx.globalAlpha = 0.9;
     this.ctx.fillText('COMBO', centerX, centerY + 38);
 
@@ -1401,6 +1437,53 @@ export class Renderer {
     }
 
     this.ctx.restore();
+  }
+
+  /**
+   * Draw sparkle particles around combo text for shiny effect
+   */
+  private drawComboSparkles(centerX: number, centerY: number, currentTime: number): void {
+    const sparkleCount = 8;
+    const radius = 50;
+
+    for (let i = 0; i < sparkleCount; i++) {
+      const angle = (i / sparkleCount) * Math.PI * 2 + (currentTime / 500);
+      const wobble = Math.sin(currentTime / 100 + i * 1.5) * 10;
+      const x = centerX + Math.cos(angle) * (radius + wobble);
+      const y = centerY + Math.sin(angle) * (radius + wobble) - 5;
+
+      const sparklePhase = (currentTime / 150 + i * 0.5) % 1;
+      const sparkleAlpha = Math.sin(sparklePhase * Math.PI) * 0.8;
+
+      if (sparkleAlpha > 0.1) {
+        const hue = (currentTime / 10 + i * 45) % 360;
+        this.ctx.save();
+        this.ctx.translate(x, y);
+        this.ctx.rotate(currentTime / 200 + i);
+        this.ctx.globalAlpha = sparkleAlpha;
+
+        // Draw 4-pointed star
+        this.ctx.beginPath();
+        const starSize = 4 + Math.sin(currentTime / 80 + i) * 2;
+        this.ctx.moveTo(0, -starSize);
+        this.ctx.lineTo(starSize * 0.3, 0);
+        this.ctx.lineTo(0, starSize);
+        this.ctx.lineTo(-starSize * 0.3, 0);
+        this.ctx.closePath();
+        this.ctx.fillStyle = `hsl(${hue}, 100%, 80%)`;
+        this.ctx.fill();
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(-starSize, 0);
+        this.ctx.lineTo(0, starSize * 0.3);
+        this.ctx.lineTo(starSize, 0);
+        this.ctx.lineTo(0, -starSize * 0.3);
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        this.ctx.restore();
+      }
+    }
   }
 
   /**

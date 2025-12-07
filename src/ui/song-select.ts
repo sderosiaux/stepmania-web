@@ -1040,6 +1040,21 @@ export class SongSelectScreen {
         this.callbacks.onMultiplayer?.();
       });
     }
+
+    // Play button click
+    const playBtn = this.container.querySelector('.play-button');
+    if (playBtn) {
+      playBtn.addEventListener('click', () => {
+        const currentPack = this.packs[this.selectedPackIndex];
+        const currentSong = currentPack?.songs[this.selectedSongIndex];
+        if (currentSong) {
+          const chart = currentSong.charts[this.selectedDifficultyIndex];
+          if (chart) {
+            this.callbacks.onSongSelect(currentSong, chart, { cmod: this.cmod, audioOffset: this.audioOffset });
+          }
+        }
+      });
+    }
   }
 
   private getStyles(): string {
