@@ -536,13 +536,27 @@ export class SongSelectScreen {
           <div class="column packs-column ${this.activeColumn === 'packs' ? 'active' : ''}">
             <div class="column-header">PACKS</div>
             <div class="column-list">
-              ${this.packs.length === 0 ? '<div class="empty">No songs</div>' : this.packs.map((pack, i) => `
-                <div class="list-item ${i === this.selectedPackIndex ? 'selected' : ''}" data-pack="${i}">
-                  <span class="item-icon">📁</span>
-                  <span class="item-name">${escapeHtml(pack.name)}</span>
-                  <span class="item-count">${pack.songs.length}</span>
+              <div class="wheel-viewport" style="--item-height: 44px; --selected-idx: ${this.selectedPackIndex}">
+                <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc(var(--selected-idx) * var(--item-height) * -1))">
+                  ${this.packs.length === 0 ? '<div class="empty">No songs</div>' : this.packs.map((pack, i) => {
+                    const offset = i - this.selectedPackIndex;
+                    const absOffset = Math.abs(offset);
+                    const rotateX = offset * -3;
+                    const translateZ = -absOffset * 5;
+                    const opacity = Math.max(0.35, 1 - absOffset * 0.1);
+                    const scale = Math.max(0.9, 1 - absOffset * 0.02);
+                    return `
+                      <div class="list-item wheel-item ${i === this.selectedPackIndex ? 'selected' : ''}"
+                           data-pack="${i}"
+                           style="transform: rotateX(${rotateX}deg) translateZ(${translateZ}px) scale(${scale}); opacity: ${opacity};">
+                        <span class="item-icon">📁</span>
+                        <span class="item-name">${escapeHtml(pack.name)}</span>
+                        <span class="item-count">${pack.songs.length}</span>
+                      </div>
+                    `;
+                  }).join('')}
                 </div>
-              `).join('')}
+              </div>
             </div>
           </div>
 
@@ -550,25 +564,37 @@ export class SongSelectScreen {
           <div class="column songs-column ${this.activeColumn === 'songs' ? 'active' : ''}">
             <div class="column-header">SONGS</div>
             <div class="column-list">
-              ${!currentPack ? '<div class="empty">Select a pack</div>' : currentPack.songs.map((song, i) => {
-                // Get best grade across all difficulties
-                const grades = song.charts.map(c => getScore(song.id, c.difficulty)).filter(Boolean);
-                const bestGrade = grades.length > 0 ? grades.sort((a, b) => {
-                  const order = ['AAAA', 'AAA', 'AA', 'A', 'B', 'C', 'D'];
-                  return order.indexOf(a!.grade) - order.indexOf(b!.grade);
-                })[0] : null;
-                return `
-                  <div class="list-item ${i === this.selectedSongIndex ? 'selected' : ''}" data-song="${i}">
-                    <div class="song-row">
-                      <span class="item-name">${escapeHtml(song.title)}</span>
-                      ${bestGrade ? `<span class="best-grade grade-${bestGrade.grade.toLowerCase()}">${bestGrade.grade}</span>` : ''}
-                    </div>
-                    <div class="song-meta">
-                      <span class="artist">${escapeHtml(song.artist)}</span>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
+              <div class="wheel-viewport" style="--item-height: 52px; --selected-idx: ${this.selectedSongIndex}">
+                <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc(var(--selected-idx) * var(--item-height) * -1))">
+                  ${!currentPack ? '<div class="empty">Select a pack</div>' : currentPack.songs.map((song, i) => {
+                    const offset = i - this.selectedSongIndex;
+                    const absOffset = Math.abs(offset);
+                    const rotateX = offset * -3;
+                    const translateZ = -absOffset * 5;
+                    const opacity = Math.max(0.35, 1 - absOffset * 0.1);
+                    const scale = Math.max(0.9, 1 - absOffset * 0.02);
+                    // Get best grade across all difficulties
+                    const grades = song.charts.map(c => getScore(song.id, c.difficulty)).filter(Boolean);
+                    const bestGrade = grades.length > 0 ? grades.sort((a, b) => {
+                      const order = ['AAAA', 'AAA', 'AA', 'A', 'B', 'C', 'D'];
+                      return order.indexOf(a!.grade) - order.indexOf(b!.grade);
+                    })[0] : null;
+                    return `
+                      <div class="list-item wheel-item ${i === this.selectedSongIndex ? 'selected' : ''}"
+                           data-song="${i}"
+                           style="transform: rotateX(${rotateX}deg) translateZ(${translateZ}px) scale(${scale}); opacity: ${opacity};">
+                        <div class="song-row">
+                          <span class="item-name">${escapeHtml(song.title)}</span>
+                          ${bestGrade ? `<span class="best-grade grade-${bestGrade.grade.toLowerCase()}">${bestGrade.grade}</span>` : ''}
+                        </div>
+                        <div class="song-meta">
+                          <span class="artist">${escapeHtml(song.artist)}</span>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -576,23 +602,35 @@ export class SongSelectScreen {
           <div class="column difficulties-column ${this.activeColumn === 'difficulties' ? 'active' : ''}">
             <div class="column-header">DIFFICULTY</div>
             <div class="column-list">
-              ${!currentSong ? '<div class="empty">Select a song</div>' : currentSong.charts.map((chart, i) => {
-                const chartScore = getScore(currentSong.id, chart.difficulty);
-                return `
-                  <div class="list-item diff-item ${i === this.selectedDifficultyIndex ? 'selected' : ''}" data-diff-idx="${i}">
-                    <div class="diff-row">
-                      <span class="diff-name" data-diff="${chart.difficulty}">${chart.difficulty}</span>
-                      <span class="diff-level">Lv.${chart.level}</span>
-                    </div>
-                    ${chartScore ? `
-                      <div class="diff-score">
-                        <span class="diff-grade grade-${chartScore.grade.toLowerCase()}">${chartScore.grade}</span>
-                        <span class="diff-score-value">${chartScore.score.toLocaleString()}</span>
+              <div class="wheel-viewport" style="--item-height: 52px; --selected-idx: ${this.selectedDifficultyIndex}">
+                <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc(var(--selected-idx) * var(--item-height) * -1))">
+                  ${!currentSong ? '<div class="empty">Select a song</div>' : currentSong.charts.map((chart, i) => {
+                    const offset = i - this.selectedDifficultyIndex;
+                    const absOffset = Math.abs(offset);
+                    const rotateX = offset * -3;
+                    const translateZ = -absOffset * 5;
+                    const opacity = Math.max(0.35, 1 - absOffset * 0.1);
+                    const scale = Math.max(0.9, 1 - absOffset * 0.02);
+                    const chartScore = getScore(currentSong.id, chart.difficulty);
+                    return `
+                      <div class="list-item wheel-item diff-item ${i === this.selectedDifficultyIndex ? 'selected' : ''}"
+                           data-diff-idx="${i}"
+                           style="transform: rotateX(${rotateX}deg) translateZ(${translateZ}px) scale(${scale}); opacity: ${opacity};">
+                        <div class="diff-row">
+                          <span class="diff-name" data-diff="${chart.difficulty}">${chart.difficulty}</span>
+                          <span class="diff-level">Lv.${chart.level}</span>
+                        </div>
+                        ${chartScore ? `
+                          <div class="diff-score">
+                            <span class="diff-grade grade-${chartScore.grade.toLowerCase()}">${chartScore.grade}</span>
+                            <span class="diff-score-value">${chartScore.score.toLocaleString()}</span>
+                          </div>
+                        ` : '<div class="diff-no-score">No play</div>'}
                       </div>
-                    ` : '<div class="diff-no-score">No play</div>'}
-                  </div>
-                `;
-              }).join('')}
+                    `;
+                  }).join('')}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -678,26 +716,10 @@ export class SongSelectScreen {
   }
 
   /**
-   * Scroll selected items into view in each column
+   * No-op: 3D wheel handles positioning automatically via CSS transforms
    */
   private scrollSelectedIntoView(): void {
-    // Scroll selected pack into view (keep at bottom when scrolling up)
-    const selectedPack = this.container.querySelector('[data-pack].selected');
-    if (selectedPack) {
-      selectedPack.scrollIntoView({ block: 'end' });
-    }
-
-    // Scroll selected song into view (keep at bottom when scrolling up)
-    const selectedSong = this.container.querySelector('[data-song].selected');
-    if (selectedSong) {
-      selectedSong.scrollIntoView({ block: 'end' });
-    }
-
-    // Scroll selected difficulty into view (keep at bottom when scrolling up)
-    const selectedDiff = this.container.querySelector('[data-diff-idx].selected');
-    if (selectedDiff) {
-      selectedDiff.scrollIntoView({ block: 'end' });
-    }
+    // The 3D wheel rotates to show selected items - no scrolling needed
   }
 
   private drawGrooveRadar(): void {
@@ -1093,8 +1115,70 @@ export class SongSelectScreen {
 
       .column-list {
         flex: 1;
-        overflow-y: auto;
+        overflow: hidden;
         padding: 0.5rem;
+        position: relative;
+      }
+
+      /* 3D Wheel Effect - Subtle curve on a huge wheel */
+      .wheel-viewport {
+        position: absolute;
+        inset: 0;
+        perspective: 1200px;
+        perspective-origin: center center;
+        overflow: hidden;
+      }
+
+      .wheel-container {
+        position: absolute;
+        left: 0;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 0 0.5rem;
+        transform-style: preserve-3d;
+        transition: transform 0.25s cubic-bezier(0.23, 1, 0.32, 1);
+      }
+
+      .wheel-item {
+        flex-shrink: 0;
+        transform-style: preserve-3d;
+        transform-origin: center center;
+        transition: transform 0.25s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.2s ease;
+      }
+
+      .wheel-item.selected {
+        opacity: 1 !important;
+      }
+
+      /* Wheel edge fade overlay */
+      .wheel-viewport::before,
+      .wheel-viewport::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 15%;
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      .wheel-viewport::before {
+        top: 0;
+        background: linear-gradient(
+          to bottom,
+          ${THEME.bg.secondary} 0%,
+          transparent 100%
+        );
+      }
+
+      .wheel-viewport::after {
+        bottom: 0;
+        background: linear-gradient(
+          to top,
+          ${THEME.bg.secondary} 0%,
+          transparent 100%
+        );
       }
 
       .empty {
