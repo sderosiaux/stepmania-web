@@ -157,6 +157,10 @@ export class Renderer {
 
   /** Smoothed health for gradual background transitions */
   private smoothedHealth: number = 50;
+
+  /** Steps remaining tracking for bump animation */
+  private lastStepsRemaining: number = 0;
+  private stepsBumpTime: number = 0;
   private lastFrameTime: number = 0;
 
   /** Current note skin */
@@ -491,6 +495,9 @@ export class Renderer {
     // Reset smoothed health to starting value
     this.smoothedHealth = 50;
     this.lastFrameTime = 0;
+    // Reset steps tracking for bump animation
+    this.lastStepsRemaining = 0;
+    this.stepsBumpTime = 0;
   }
 
   /**
@@ -550,7 +557,7 @@ export class Renderer {
     const panelY = startY - 35;
     const panelWidth = barWidth + 110;
     // Height includes: per-direction rows + global stats section + steps remaining
-    const panelHeight = DIRECTIONS.length * rowHeight + 185;
+    const panelHeight = DIRECTIONS.length * rowHeight + 220;
 
     this.ctx.save();
 
@@ -565,19 +572,11 @@ export class Renderer {
     this.roundRect(panelX, panelY, panelWidth, panelHeight, 10);
     this.ctx.stroke();
 
-    // Title with steps remaining
+    // Title
     this.ctx.font = '12px -apple-system, sans-serif';
     this.ctx.fillStyle = THEME.text.muted;
     this.ctx.textAlign = 'left';
     this.ctx.fillText('TIMING', statsX, startY - 5);
-
-    // Steps remaining (right-aligned in header)
-    if (totalSteps > 0) {
-      this.ctx.textAlign = 'right';
-      this.ctx.font = 'bold 12px -apple-system, sans-serif';
-      this.ctx.fillStyle = stepsRemaining === 0 ? THEME.accent.success : THEME.text.secondary;
-      this.ctx.fillText(`${stepsRemaining}/${totalSteps}`, statsX + barWidth + 45, startY - 5);
-    }
 
     for (let i = 0; i < DIRECTIONS.length; i++) {
       const dir = DIRECTIONS[i]!;
@@ -660,6 +659,48 @@ export class Renderer {
     // Draw global average and offset suggestion below the per-direction stats
     const globalY = startY + DIRECTIONS.length * rowHeight + 40;
     this.drawGlobalTimingStats(statsX, globalY, barWidth);
+
+    // Draw steps remaining at bottom of panel with bump animation
+    if (totalSteps > 0) {
+      const stepsY = globalY + 85;
+      const now = performance.now();
+
+      // Detect decrease and trigger bump
+      if (stepsRemaining < this.lastStepsRemaining && this.lastStepsRemaining > 0) {
+        this.stepsBumpTime = now;
+      }
+      this.lastStepsRemaining = stepsRemaining;
+
+      // Calculate bump scale (1.0 -> 1.4 -> 1.0 over 200ms)
+      const bumpDuration = 200;
+      const timeSinceBump = now - this.stepsBumpTime;
+      let scale = 1.0;
+      if (timeSinceBump < bumpDuration) {
+        const progress = timeSinceBump / bumpDuration;
+        // Ease out: quick pop then settle
+        scale = 1.0 + 0.4 * Math.sin(progress * Math.PI);
+      }
+
+      // Draw steps count centered
+      this.ctx.save();
+      const centerX = panelX + panelWidth / 2;
+      this.ctx.translate(centerX, stepsY);
+      this.ctx.scale(scale, scale);
+
+      // Color: green when 0, accent otherwise
+      this.ctx.fillStyle = stepsRemaining === 0 ? THEME.accent.success : THEME.accent.primary;
+      this.ctx.font = 'bold 32px -apple-system, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(`${stepsRemaining}`, 0, 0);
+
+      // Small label below
+      this.ctx.fillStyle = THEME.text.muted;
+      this.ctx.font = '10px -apple-system, sans-serif';
+      this.ctx.fillText('steps left', 0, 20);
+
+      this.ctx.restore();
+    }
 
     this.ctx.restore();
   }
