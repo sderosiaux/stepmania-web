@@ -19,12 +19,24 @@ export const THEME = {
     secondary: '#a0a0b0',
     muted: '#606070',
   },
-  // Arrow colors by direction (classic DDR style)
+  // Arrow colors by direction (classic DDR style) - used for receptors
   arrows: {
     left: '#c850c0',    // Magenta/Pink
     down: '#4fc3f7',    // Light Blue
     up: '#66bb6a',      // Green
     right: '#ff7043',   // Orange/Red
+  },
+  // Beat subdivision colors (ultra-brilliant neon)
+  beatColors: {
+    4: '#ff0040',   // 1/4 notes (quarter notes) - Neon Red
+    8: '#0066ff',   // 1/8 notes (eighth notes) - Strong Blue
+    12: '#ff00ff',  // 1/12 notes (triplets) - Neon Magenta
+    16: '#ffff00',  // 1/16 notes (sixteenth notes) - Neon Yellow
+    24: '#ff0080',  // 1/24 notes - Neon Hot Pink
+    32: '#ff8000',  // 1/32 notes - Neon Orange
+    48: '#00ffff',  // 1/48 notes - Neon Cyan
+    64: '#00ff80',  // 1/64 notes - Neon Green
+    other: '#b0bec5', // Other subdivisions - Light Gray
   },
   // Judgment colors
   judgment: {
@@ -762,6 +774,70 @@ export class Renderer {
   }
 
   /**
+   * Get beat subdivision color based on beat position
+   */
+  getBeatColor(beat: number | undefined): string {
+    if (beat === undefined) return THEME.beatColors.other;
+
+    // Get fractional part of beat
+    const fraction = beat % 1;
+    const epsilon = 0.001;
+
+    // Check subdivisions from coarsest to finest
+    // 1/4 notes (on the beat: 0, 1, 2, 3...)
+    if (Math.abs(fraction) < epsilon || Math.abs(fraction - 1) < epsilon) {
+      return THEME.beatColors[4];
+    }
+
+    // 1/8 notes (0.5)
+    if (Math.abs(fraction - 0.5) < epsilon) {
+      return THEME.beatColors[8];
+    }
+
+    // 1/12 notes (triplets: 0.333..., 0.666...)
+    if (Math.abs(fraction - 1/3) < epsilon || Math.abs(fraction - 2/3) < epsilon) {
+      return THEME.beatColors[12];
+    }
+
+    // 1/16 notes (0.25, 0.75)
+    if (Math.abs(fraction - 0.25) < epsilon || Math.abs(fraction - 0.75) < epsilon) {
+      return THEME.beatColors[16];
+    }
+
+    // 1/24 notes (0.0833, 0.1666, 0.4166, 0.5833, 0.9166...)
+    const sixths = [1/6, 5/6];
+    for (const s of sixths) {
+      if (Math.abs(fraction - s) < epsilon) return THEME.beatColors[24];
+    }
+    // 1/24 also includes 1/8 offsets within triplets
+    const twentyFourths = [1/12, 5/12, 7/12, 11/12];
+    for (const t of twentyFourths) {
+      if (Math.abs(fraction - t) < epsilon) return THEME.beatColors[24];
+    }
+
+    // 1/32 notes
+    const thirtySeconds = [1/8, 3/8, 5/8, 7/8];
+    for (const t of thirtySeconds) {
+      if (Math.abs(fraction - t) < epsilon) return THEME.beatColors[32];
+    }
+
+    // 1/48 notes
+    const fortyEighths = [1/16, 3/16, 5/16, 7/16, 9/16, 11/16, 13/16, 15/16];
+    for (const f of fortyEighths) {
+      if (Math.abs(fraction - f) < epsilon) return THEME.beatColors[48];
+    }
+
+    // 1/64 notes
+    const sixtyFourths = [1/32, 3/32, 5/32, 7/32, 9/32, 11/32, 13/32, 15/32,
+                          17/32, 19/32, 21/32, 23/32, 25/32, 27/32, 29/32, 31/32];
+    for (const s of sixtyFourths) {
+      if (Math.abs(fraction - s) < epsilon) return THEME.beatColors[64];
+    }
+
+    return THEME.beatColors.other;
+  }
+
+  /**
    * Draw a single arrow - simple, large, easy to see
    */
   drawArrow(
@@ -769,10 +845,11 @@ export class Renderer {
     y: number,
     direction: Direction,
     alpha: number = 1,
-    isReceptor: boolean = false
+    isReceptor: boolean = false,
+    colorOverride?: string
   ): void {
     const size = LAYOUT.arrowSize;
-    const color = THEME.arrows[direction];
+    const color = colorOverride ?? THEME.arrows[direction];
 
     this.ctx.save();
     this.ctx.translate(x, y);
@@ -831,13 +908,6 @@ export class Renderer {
     } else {
       // Note arrow
 
-      // Dark outline
-      this.ctx.strokeStyle = '#000000';
-      this.ctx.lineWidth = 4;
-      this.ctx.lineJoin = 'miter';
-      drawArrowShape();
-      this.ctx.stroke();
-
       // Main gradient fill
       const gradient = this.ctx.createLinearGradient(0, -s, 0, s);
       gradient.addColorStop(0, this.lightenColor(color, 35));
@@ -848,13 +918,11 @@ export class Renderer {
       drawArrowShape();
       this.ctx.fill();
 
-      // White inner outline
-      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-      this.ctx.lineWidth = 2;
-      this.ctx.save();
-      this.ctx.scale(0.85, 0.85);
+      // Darker colored stroke for visibility
+      this.ctx.strokeStyle = this.darkenColor(color, 40);
+      this.ctx.lineWidth = 3;
+      this.ctx.lineJoin = 'miter';
       drawArrowShape();
-      this.ctx.restore();
       this.ctx.stroke();
     }
 
@@ -943,7 +1011,10 @@ export class Renderer {
       // Fade out notes that are past the receptor
       const alpha = timeDiff < 0 ? Math.max(0, 1 + timeDiff / 200) : 1;
 
-      this.drawArrow(x, y, note.direction, alpha);
+      // Get beat subdivision color
+      const beatColor = this.getBeatColor(note.beat);
+
+      this.drawArrow(x, y, note.direction, alpha, false, beatColor);
     }
   }
 
@@ -952,7 +1023,8 @@ export class Renderer {
    */
   private drawHoldNote(note: Note, currentTime: number, pixelsPerMs: number): void {
     const x = this.columnX[note.direction];
-    const color = THEME.arrows[note.direction];
+    // Hold body is always yellowish/gold
+    const holdBodyColor = '#ffcc00';
     const holdState = note.holdState;
 
     // Calculate positions
@@ -989,18 +1061,18 @@ export class Renderer {
         bodyGradient.addColorStop(0.5, '#444455');
         bodyGradient.addColorStop(1, '#333344');
       } else if (isActive) {
-        // Active: bright glowing
-        const rgb = this.hexToRgb(color);
+        // Active: bright glowing yellow
+        const rgb = this.hexToRgb(holdBodyColor);
         bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
         bodyGradient.addColorStop(0.5, `rgba(${Math.min(255, rgb.r + 80)}, ${Math.min(255, rgb.g + 80)}, ${Math.min(255, rgb.b + 80)}, 1)`);
         bodyGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
 
         // Glow effect
-        this.ctx.shadowColor = color;
+        this.ctx.shadowColor = holdBodyColor;
         this.ctx.shadowBlur = 15;
       } else {
-        // Idle: normal color
-        const rgb = this.hexToRgb(color);
+        // Idle: yellow color
+        const rgb = this.hexToRgb(holdBodyColor);
         bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
         bodyGradient.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`);
         bodyGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
@@ -1029,10 +1101,11 @@ export class Renderer {
     // Draw head - always visible while holding, fades when dropped
     if (!holdState?.completed) {
       const headAlpha = isDropped ? 0.4 : 1;
-      this.drawArrow(x, headY, note.direction, headAlpha);
+      const beatColor = this.getBeatColor(note.beat);
+      this.drawArrow(x, headY, note.direction, headAlpha, false, beatColor);
     }
 
-    // Draw tail cap
+    // Draw tail cap (also yellowish)
     if (tailY > 0 && tailY < this.height + LAYOUT.arrowSize) {
       const capHeight = LAYOUT.arrowSize * 0.3;
       const capGradient = this.ctx.createLinearGradient(0, tailY - capHeight, 0, tailY);
@@ -1041,9 +1114,9 @@ export class Renderer {
         capGradient.addColorStop(0, '#444455');
         capGradient.addColorStop(1, '#333344');
       } else {
-        const rgb = this.hexToRgb(color);
+        const rgb = this.hexToRgb(holdBodyColor);
         capGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
-        capGradient.addColorStop(1, this.darkenColor(color, 30));
+        capGradient.addColorStop(1, this.darkenColor(holdBodyColor, 30));
       }
 
       this.ctx.fillStyle = capGradient;
@@ -1051,7 +1124,7 @@ export class Renderer {
       this.ctx.fill();
 
       // Cap border
-      this.ctx.strokeStyle = isDropped ? '#555566' : this.darkenColor(color, 20);
+      this.ctx.strokeStyle = isDropped ? '#555566' : this.darkenColor(holdBodyColor, 20);
       this.ctx.lineWidth = 2;
       this.roundRect(x - bodyWidth / 2, tailY - capHeight, bodyWidth, capHeight, 4);
       this.ctx.stroke();

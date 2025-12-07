@@ -234,7 +234,7 @@ function parseNoteData(
   const errors: ParseError[] = [];
 
   // Track active holds per lane (column index -> start note)
-  const activeHolds: Map<number, { id: number; time: number; direction: Direction }> = new Map();
+  const activeHolds: Map<number, { id: number; time: number; beat: number; direction: Direction }> = new Map();
 
   // Split into measures (separated by commas)
   const measures = noteData
@@ -284,6 +284,7 @@ function parseNoteData(
             notes.push({
               id: noteId++,
               time,
+              beat,
               direction,
               type: 'tap',
               judged: false,
@@ -296,6 +297,7 @@ function parseNoteData(
             activeHolds.set(col, {
               id: noteId++,
               time,
+              beat,
               direction,
             });
             break;
@@ -308,6 +310,7 @@ function parseNoteData(
               notes.push({
                 id: holdStart.id,
                 time: holdStart.time,
+                beat: holdStart.beat,
                 direction: holdStart.direction,
                 type: 'hold',
                 duration,

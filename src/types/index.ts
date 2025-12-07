@@ -96,6 +96,8 @@ export interface Note {
   id: number;
   /** Time in milliseconds from song start */
   time: number;
+  /** Beat position (e.g., 0, 0.25, 0.5, 0.75 for quarter notes) */
+  beat?: number;
   /** Arrow direction */
   direction: Direction;
   /** Note type (tap or hold/freeze) */

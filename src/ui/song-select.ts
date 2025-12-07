@@ -334,13 +334,17 @@ export class SongSelectScreen {
   private applyFilter(): void {
     const minDifficultyIndex = this.getMinDifficultyIndex();
     const filteredSongs = this.allSongs.map(song => {
-      if (minDifficultyIndex === 0) return song;
+      if (minDifficultyIndex === 0) {
+        // Sort charts by level ascending
+        return { ...song, charts: [...song.charts].sort((a, b) => a.level - b.level) };
+      }
       const filteredCharts = song.charts.filter(chart => {
         const chartDiffIndex = DIFFICULTY_ORDER.indexOf(chart.difficulty as typeof DIFFICULTY_ORDER[number]);
         return chartDiffIndex >= minDifficultyIndex;
       });
       if (filteredCharts.length === 0) return null;
-      return { ...song, charts: filteredCharts };
+      // Sort charts by level ascending
+      return { ...song, charts: filteredCharts.sort((a, b) => a.level - b.level) };
     }).filter((song): song is Song => song !== null);
     this.packs = this.organizeSongsIntoPacks(filteredSongs);
   }
