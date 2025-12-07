@@ -1,4 +1,4 @@
-import type { Direction, Note, JudgmentGrade, GameplayState } from '../types';
+import type { Direction, Note, JudgmentGrade, GameplayState, NoteSkin } from '../types';
 import { DIRECTIONS } from '../types';
 
 // ============================================================================
@@ -146,6 +146,9 @@ export class Renderer {
   /** Smoothed health for gradual background transitions */
   private smoothedHealth: number = 50;
   private lastFrameTime: number = 0;
+
+  /** Current note skin */
+  private noteSkin: NoteSkin = 'arrows';
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -480,6 +483,13 @@ export class Renderer {
    */
   setAudioOffset(offset: number): void {
     this.currentAudioOffset = offset;
+  }
+
+  /**
+   * Set the note skin style
+   */
+  setNoteSkin(skin: NoteSkin): void {
+    this.noteSkin = skin;
   }
 
   /**
@@ -867,8 +877,21 @@ export class Renderer {
 
     const s = size / 2;
 
-    // Simple large arrow shape - maximum coverage
-    const drawArrowShape = () => {
+    // Use gems skin or arrows skin
+    if (this.noteSkin === 'gems') {
+      this.drawGemShape(s, color, isReceptor, alpha);
+    } else {
+      this.drawArrowShape(s, color, isReceptor, alpha);
+    }
+
+    this.ctx.restore();
+  }
+
+  /**
+   * Draw arrow shape (classic DDR style)
+   */
+  private drawArrowShape(s: number, color: string, isReceptor: boolean, alpha: number): void {
+    const drawShape = () => {
       this.ctx.beginPath();
       // Top point
       this.ctx.moveTo(0, -s * 0.95);
@@ -888,14 +911,13 @@ export class Renderer {
     };
 
     if (isReceptor) {
-      // Receptor: dark with colored outline when active
       if (alpha > 0.5) {
         this.ctx.shadowColor = color;
         this.ctx.shadowBlur = 15;
       }
 
       this.ctx.fillStyle = '#151518';
-      drawArrowShape();
+      drawShape();
       this.ctx.fill();
 
       this.ctx.shadowBlur = 0;
@@ -904,29 +926,76 @@ export class Renderer {
       this.ctx.lineWidth = 3;
       this.ctx.lineJoin = 'miter';
       this.ctx.stroke();
-
     } else {
-      // Note arrow
-
-      // Main gradient fill
       const gradient = this.ctx.createLinearGradient(0, -s, 0, s);
       gradient.addColorStop(0, this.lightenColor(color, 35));
       gradient.addColorStop(0.5, color);
       gradient.addColorStop(1, this.darkenColor(color, 20));
 
       this.ctx.fillStyle = gradient;
-      drawArrowShape();
+      drawShape();
       this.ctx.fill();
 
-      // Darker colored stroke for visibility
       this.ctx.strokeStyle = this.darkenColor(color, 40);
       this.ctx.lineWidth = 3;
       this.ctx.lineJoin = 'miter';
-      drawArrowShape();
+      drawShape();
       this.ctx.stroke();
     }
+  }
 
-    this.ctx.restore();
+  /**
+   * Draw gem shape (Guitar Hero style - round with inner shine)
+   */
+  private drawGemShape(s: number, color: string, isReceptor: boolean, alpha: number): void {
+    const radius = s * 0.85;
+
+    if (isReceptor) {
+      // Receptor: hollow circle with glow when active
+      if (alpha > 0.5) {
+        this.ctx.shadowColor = color;
+        this.ctx.shadowBlur = 15;
+      }
+
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      this.ctx.fillStyle = '#151518';
+      this.ctx.fill();
+
+      this.ctx.shadowBlur = 0;
+
+      this.ctx.strokeStyle = alpha > 0.5 ? color : '#3a3a45';
+      this.ctx.lineWidth = 3;
+      this.ctx.stroke();
+    } else {
+      // Note gem: filled circle with gradient and shine
+
+      // Main radial gradient
+      const gradient = this.ctx.createRadialGradient(
+        -s * 0.2, -s * 0.2, 0,
+        0, 0, radius
+      );
+      gradient.addColorStop(0, this.lightenColor(color, 50));
+      gradient.addColorStop(0.4, this.lightenColor(color, 20));
+      gradient.addColorStop(0.7, color);
+      gradient.addColorStop(1, this.darkenColor(color, 30));
+
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      this.ctx.fillStyle = gradient;
+      this.ctx.fill();
+
+      // Outer stroke
+      this.ctx.strokeStyle = this.darkenColor(color, 40);
+      this.ctx.lineWidth = 3;
+      this.ctx.stroke();
+
+      // Inner shine highlight
+      this.ctx.beginPath();
+      this.ctx.arc(-s * 0.25, -s * 0.25, radius * 0.35, 0, Math.PI * 2);
+      this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.4})`;
+      this.ctx.fill();
+    }
   }
 
   /**

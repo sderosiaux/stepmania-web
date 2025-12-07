@@ -1,6 +1,6 @@
-import type { Song, Chart, Settings, SongPack, Note } from '../types';
+import type { Song, Chart, Settings, SongPack, Note, NoteSkin } from '../types';
 import { THEME } from '../render';
-import { DEFAULT_SETTINGS } from '../types';
+import { DEFAULT_SETTINGS, NOTE_SKINS } from '../types';
 import { audioManager } from '../audio';
 
 // ============================================================================
@@ -219,6 +219,7 @@ export class SongSelectScreen {
   private currentPreviewSongId: string | null = null;
   private previewDebounceTimer: number | null = null;
   private animationStartTime: number = performance.now();
+  private noteSkin: NoteSkin = DEFAULT_SETTINGS.noteSkin;
 
   constructor(container: HTMLElement, callbacks: SongSelectCallbacks) {
     this.container = container;
@@ -227,6 +228,7 @@ export class SongSelectScreen {
     this.boundKeyUpHandler = this.handleKeyUp.bind(this);
     this.cmod = this.loadCmod();
     this.audioOffset = this.loadAudioOffset();
+    this.noteSkin = this.loadNoteSkin();
   }
 
   private loadCmod(): number {
@@ -253,6 +255,18 @@ export class SongSelectScreen {
 
   private saveAudioOffset(): void {
     localStorage.setItem('audioOffset', this.audioOffset.toString());
+  }
+
+  private loadNoteSkin(): NoteSkin {
+    const saved = localStorage.getItem('noteSkin');
+    if (saved !== null && NOTE_SKINS.includes(saved as NoteSkin)) {
+      return saved as NoteSkin;
+    }
+    return DEFAULT_SETTINGS.noteSkin;
+  }
+
+  private saveNoteSkin(): void {
+    localStorage.setItem('noteSkin', this.noteSkin);
   }
 
   show(songs: Song[]): void {
@@ -482,7 +496,7 @@ export class SongSelectScreen {
         if (currentSong) {
           const chart = currentSong.charts[this.selectedDifficultyIndex];
           if (chart) {
-            this.callbacks.onSongSelect(currentSong, chart, { cmod: this.cmod, audioOffset: this.audioOffset });
+            this.callbacks.onSongSelect(currentSong, chart, { cmod: this.cmod, audioOffset: this.audioOffset, noteSkin: this.noteSkin });
           }
         }
         break;
@@ -497,7 +511,7 @@ export class SongSelectScreen {
         if (currentSong && this.callbacks.onDemo) {
           const chart = currentSong.charts[this.selectedDifficultyIndex];
           if (chart) {
-            this.callbacks.onDemo(currentSong, chart, { cmod: this.cmod, audioOffset: this.audioOffset });
+            this.callbacks.onDemo(currentSong, chart, { cmod: this.cmod, audioOffset: this.audioOffset, noteSkin: this.noteSkin });
           }
         }
         break;
@@ -704,6 +718,7 @@ export class SongSelectScreen {
           <div class="settings-row">
             ${this.renderCmodSelector()}
             ${this.renderOffsetSelector()}
+            ${this.renderSkinSelector()}
           </div>
           <div class="nav-hint">
             <span>↑↓ Navigate</span>
@@ -990,6 +1005,21 @@ export class SongSelectScreen {
     `;
   }
 
+  private renderSkinSelector(): string {
+    const skinLabels: Record<NoteSkin, string> = {
+      arrows: '↑ Arrows',
+      gems: '● Gems',
+    };
+    return `
+      <div class="skin-selector">
+        <span class="label">Skin:</span>
+        <button class="skin-btn" data-skin-prev>◀</button>
+        <div class="skin-value">${skinLabels[this.noteSkin]}</div>
+        <button class="skin-btn" data-skin-next>▶</button>
+      </div>
+    `;
+  }
+
   private addClickHandlers(): void {
     // Pack clicks
     this.container.querySelectorAll('[data-pack]').forEach(el => {
@@ -1041,6 +1071,19 @@ export class SongSelectScreen {
       });
     });
 
+    // Skin selector button clicks
+    const skinPrev = this.container.querySelector('[data-skin-prev]');
+    const skinNext = this.container.querySelector('[data-skin-next]');
+    const cycleSkin = (direction: number) => {
+      const currentIdx = NOTE_SKINS.indexOf(this.noteSkin);
+      const newIdx = (currentIdx + direction + NOTE_SKINS.length) % NOTE_SKINS.length;
+      this.noteSkin = NOTE_SKINS[newIdx]!;
+      this.saveNoteSkin();
+      this.render();
+    };
+    skinPrev?.addEventListener('click', () => cycleSkin(-1));
+    skinNext?.addEventListener('click', () => cycleSkin(1));
+
     // Multiplayer button click
     const mpBtn = this.container.querySelector('#multiplayer-btn');
     if (mpBtn && this.callbacks.onMultiplayer) {
@@ -1058,7 +1101,7 @@ export class SongSelectScreen {
         if (currentSong) {
           const chart = currentSong.charts[this.selectedDifficultyIndex];
           if (chart) {
-            this.callbacks.onSongSelect(currentSong, chart, { cmod: this.cmod, audioOffset: this.audioOffset });
+            this.callbacks.onSongSelect(currentSong, chart, { cmod: this.cmod, audioOffset: this.audioOffset, noteSkin: this.noteSkin });
           }
         }
       });
@@ -1669,13 +1712,13 @@ export class SongSelectScreen {
         align-items: center;
       }
 
-      .cmod-selector, .offset-selector {
+      .cmod-selector, .offset-selector, .skin-selector {
         display: flex;
         align-items: center;
         gap: 0.5rem;
       }
 
-      .cmod-selector .label, .offset-selector .label {
+      .cmod-selector .label, .offset-selector .label, .skin-selector .label {
         font-size: 0.75rem;
         color: ${THEME.text.secondary};
       }
@@ -1714,6 +1757,42 @@ export class SongSelectScreen {
       }
 
       .offset-btn:active {
+        transform: scale(0.95);
+      }
+
+      .skin-value {
+        padding: 0.3rem 0.6rem;
+        background: rgba(255, 0, 170, 0.15);
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: ${THEME.accent.secondary};
+        min-width: 80px;
+        text-align: center;
+      }
+
+      .skin-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: ${THEME.bg.tertiary};
+        color: ${THEME.text.primary};
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .skin-btn:hover {
+        background: ${THEME.accent.secondary};
+        color: ${THEME.bg.primary};
+      }
+
+      .skin-btn:active {
         transform: scale(0.95);
       }
 

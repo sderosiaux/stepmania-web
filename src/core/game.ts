@@ -157,6 +157,7 @@ export class GameController {
     // Reset timing stats and pause tracking for new game
     this.renderer.resetTimings();
     this.renderer.setAudioOffset(this.settings.audioOffset);
+    this.renderer.setNoteSkin(this.settings.noteSkin);
     this.pauseTime = 0;
     this.totalPauseDuration = 0;
 

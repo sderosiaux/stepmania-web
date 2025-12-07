@@ -287,6 +287,12 @@ export interface ResultsData {
   directionStats?: Record<Direction, DirectionStats>;
 }
 
+/** Note skin styles */
+export type NoteSkin = 'arrows' | 'gems';
+
+/** Available note skins */
+export const NOTE_SKINS: readonly NoteSkin[] = ['arrows', 'gems'] as const;
+
 /** User settings */
 export interface Settings {
   /** Audio offset in ms (positive = audio plays later) */
@@ -299,6 +305,8 @@ export interface Settings {
   cmod: number;
   /** Background dim (0-1) */
   backgroundDim: number;
+  /** Note skin style */
+  noteSkin: NoteSkin;
 }
 
 /** Available CMod speeds */
@@ -311,4 +319,5 @@ export const DEFAULT_SETTINGS: Settings = {
   scrollSpeed: 1,
   cmod: 500, // Default to C500
   backgroundDim: 0.8,
+  noteSkin: 'arrows',
 };
