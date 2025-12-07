@@ -29,7 +29,7 @@ export type Difficulty = 'Beginner' | 'Easy' | 'Medium' | 'Hard' | 'Challenge';
 export type JudgmentGrade = 'marvelous' | 'perfect' | 'great' | 'good' | 'boo' | 'miss';
 
 /** Letter grades for final score */
-export type LetterGrade = 'AAA' | 'AA' | 'A' | 'B' | 'C' | 'D';
+export type LetterGrade = 'AAAA' | 'AAA' | 'AA' | 'A' | 'B' | 'C' | 'D';
 
 // ============================================================================
 // Timing Windows (in milliseconds)
@@ -65,12 +65,12 @@ export const JUDGMENT_MAINTAINS_COMBO: Record<JudgmentGrade, boolean> = {
 
 /** Health change for each judgment (positive = gain, negative = lose) */
 export const JUDGMENT_HEALTH: Record<JudgmentGrade, number> = {
-  marvelous: 0.8,
-  perfect: 0.6,
-  great: 0.2,
-  good: -1.0,
-  boo: -3.0,
-  miss: -5.0,
+  marvelous: 2.0,
+  perfect: 1.5,
+  great: 0.5,
+  good: -2.5,
+  boo: -6.0,
+  miss: -10.0,
 };
 
 /** Grade thresholds (percentage required) */
@@ -87,6 +87,9 @@ export const GRADE_THRESHOLDS: { grade: LetterGrade; threshold: number }[] = [
 // Data Structures
 // ============================================================================
 
+/** Note type */
+export type NoteType = 'tap' | 'hold';
+
 /** A single note/arrow in the chart */
 export interface Note {
   /** Unique ID for this note */
@@ -95,10 +98,32 @@ export interface Note {
   time: number;
   /** Arrow direction */
   direction: Direction;
+  /** Note type (tap or hold/freeze) */
+  type: NoteType;
+  /** Duration in ms (for hold notes only) */
+  duration?: number;
+  /** End time in ms (for hold notes: time + duration) */
+  endTime?: number;
   /** Whether this note has been judged */
   judged: boolean;
   /** The judgment received (if judged) */
   judgment?: Judgment;
+  /** Hold state (for freeze arrows) */
+  holdState?: HoldState;
+}
+
+/** State of a hold/freeze note */
+export interface HoldState {
+  /** Is the hold currently being held */
+  isHeld: boolean;
+  /** Has the hold been started (head hit) */
+  started: boolean;
+  /** Has the hold been completed successfully */
+  completed: boolean;
+  /** Has the hold been dropped/failed */
+  dropped: boolean;
+  /** Progress through the hold (0-1) */
+  progress: number;
 }
 
 /** Result of judging a note */
@@ -141,6 +166,16 @@ export interface Song {
   previewStart: number;
   /** Available charts */
   charts: Chart[];
+  /** Song pack/folder name */
+  pack?: string;
+}
+
+/** Song pack/folder containing songs */
+export interface SongPack {
+  /** Pack name */
+  name: string;
+  /** Songs in this pack */
+  songs: Song[];
 }
 
 // ============================================================================
@@ -206,6 +241,10 @@ export interface ResultsData {
   totalNotes: number;
   /** Percentage (0-100) */
   percentage: number;
+  /** Whether the player failed (lifebar depleted) */
+  failed?: boolean;
+  /** Whether the player achieved a full combo (no good/boo/miss) */
+  isFullCombo: boolean;
 }
 
 /** User settings */

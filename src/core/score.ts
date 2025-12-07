@@ -163,7 +163,12 @@ export function calculatePercentage(state: ScoreState): number {
 /**
  * Determine letter grade from percentage
  */
-export function calculateGrade(percentage: number): LetterGrade {
+export function calculateGrade(percentage: number, isFullMarvelous: boolean = false): LetterGrade {
+  // Full marvelous (all notes are marvelous) gets AAAA
+  if (isFullMarvelous && percentage >= 100) {
+    return 'AAAA';
+  }
+
   for (const { grade, threshold } of GRADE_THRESHOLDS) {
     if (percentage >= threshold) {
       return grade;
@@ -182,7 +187,17 @@ export function calculateGrade(percentage: number): LetterGrade {
 export function generateResults(state: ScoreState, song: Song, chart: Chart): ResultsData {
   const percentage = calculatePercentage(state);
   const score = calculateFinalScore(state);
-  const grade = calculateGrade(percentage);
+
+  // Check if all notes were marvelous (full marvelous = AAAA)
+  const isFullMarvelous = state.judgmentCounts.marvelous === state.totalNotes;
+  const grade = calculateGrade(percentage, isFullMarvelous);
+
+  // Full combo = no judgments below great (no good, boo, or miss)
+  const isFullCombo =
+    state.judgmentCounts.good === 0 &&
+    state.judgmentCounts.boo === 0 &&
+    state.judgmentCounts.miss === 0 &&
+    state.totalJudged > 0;
 
   return {
     song,
@@ -193,5 +208,7 @@ export function generateResults(state: ScoreState, song: Song, chart: Chart): Re
     judgmentCounts: { ...state.judgmentCounts },
     totalNotes: state.totalNotes,
     percentage,
+    failed: state.failed,
+    isFullCombo,
   };
 }

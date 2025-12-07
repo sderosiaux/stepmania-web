@@ -1,5 +1,5 @@
-import type { Song, Chart, Note, GameplayState, Direction, Settings, ResultsData } from '../types';
-import { DEFAULT_SETTINGS, DIRECTIONS } from '../types';
+import type { Song, Chart, Note, GameplayState, Settings, ResultsData } from '../types';
+import { DEFAULT_SETTINGS } from '../types';
 import { audioManager } from '../audio';
 import { inputManager } from '../input';
 import { Renderer } from '../render';
@@ -10,7 +10,7 @@ import { createScoreState, applyJudgment, calculateFinalScore, generateResults, 
 // Game Controller
 // ============================================================================
 
-export type GameEventType = 'judgment' | 'combo-break' | 'song-end' | 'pause' | 'resume';
+export type GameEventType = 'judgment' | 'combo-break' | 'song-end' | 'song-fail' | 'pause' | 'resume';
 
 export interface GameEvent {
   type: GameEventType;
@@ -41,6 +41,12 @@ export class GameController {
   /** Preparation time before first note (ms) - lets arrows scroll up from bottom */
   private readonly PREP_TIME: number = 3000;
 
+  /** Time when paused (for freezing game time) */
+  private pauseTime: number = 0;
+
+  /** Total time spent paused (to adjust game clock) */
+  private totalPauseDuration: number = 0;
+
   /** Is game running */
   private running: boolean = false;
 
@@ -48,14 +54,18 @@ export class GameController {
   private listeners: GameEventListener[] = [];
 
   /** Countdown state */
-  private countdown: { active: boolean; count: number; startTime: number } = {
+  private countdown: { active: boolean; count: number; startTime: number; isResume: boolean } = {
     active: false,
     count: 3,
     startTime: 0,
+    isResume: false,
   };
 
   /** Whether audio is available for this song */
   private hasAudio: boolean = false;
+
+  /** Demo/autoplay mode */
+  private autoplay: boolean = false;
 
   constructor(canvas: HTMLCanvasElement, settings: Settings = DEFAULT_SETTINGS) {
     this.renderer = new Renderer(canvas);
@@ -91,7 +101,8 @@ export class GameController {
   /**
    * Start a new game with the given song and chart
    */
-  async start(song: Song, chart: Chart): Promise<void> {
+  async start(song: Song, chart: Chart, autoplay: boolean = false): Promise<void> {
+    this.autoplay = autoplay;
     // Try to load audio (may fail for demo songs)
     this.hasAudio = false;
     try {
@@ -103,8 +114,23 @@ export class GameController {
       this.hasAudio = false;
     }
 
-    // Create fresh notes array (clone to avoid mutating original)
-    const activeNotes: Note[] = chart.notes.map((n) => ({ ...n, judged: false }));
+    // Create fresh notes array (deep clone to avoid mutating original)
+    const activeNotes: Note[] = chart.notes.map((n) => {
+      const note: Note = {
+        ...n,
+        judged: false,
+      };
+      if (n.type === 'hold') {
+        note.holdState = {
+          isHeld: false,
+          started: false,
+          completed: false,
+          dropped: false,
+          progress: 0,
+        };
+      }
+      return note;
+    });
 
     // Initialize state
     this.state = {
@@ -122,6 +148,11 @@ export class GameController {
 
     this.scoreState = createScoreState(chart.notes.length);
 
+    // Reset timing stats and pause tracking for new game
+    this.renderer.resetTimings();
+    this.pauseTime = 0;
+    this.totalPauseDuration = 0;
+
     // Start input listening
     inputManager.start();
 
@@ -130,6 +161,7 @@ export class GameController {
       active: true,
       count: 3,
       startTime: performance.now(),
+      isResume: false,
     };
 
     this.running = true;
@@ -165,8 +197,18 @@ export class GameController {
     // Get current game time (synced to audio)
     const currentTime = this.getCurrentGameTime();
 
-    // Process inputs
-    this.processInputs(currentTime);
+    // Handle autoplay mode
+    if (this.autoplay) {
+      this.processAutoplay(currentTime);
+    }
+
+    // Process inputs (skip in autoplay)
+    if (!this.autoplay) {
+      this.processInputs(currentTime);
+    }
+
+    // Update hold notes
+    this.updateHolds(currentTime);
 
     // Check for missed notes
     this.checkMisses(currentTime);
@@ -174,6 +216,12 @@ export class GameController {
     // Update score display
     if (this.scoreState) {
       this.state.score = calculateFinalScore(this.scoreState);
+
+      // Check for lifebar fail
+      if (this.scoreState.failed && !this.state.ended) {
+        this.failSong();
+        return;
+      }
     }
 
     // Check for song end
@@ -185,7 +233,8 @@ export class GameController {
       currentTime,
       new Set(inputManager.getHeldDirections()),
       this.settings.cmod,
-      this.scoreState?.health ?? 50
+      this.scoreState?.health ?? 50,
+      this.autoplay
     );
 
     // Continue loop
@@ -204,19 +253,32 @@ export class GameController {
     const currentCount = 3 - Math.floor(elapsed / countdownDuration);
 
     if (currentCount <= 0) {
-      // Countdown finished, start the preparation phase
+      // Countdown finished
       this.countdown.active = false;
-      this.gameStartTime = performance.now();
-      // Add prep time offset so game time starts negative, giving notes time to scroll up
-      this.audioStartOffset = this.state!.song.offset + this.settings.audioOffset - this.PREP_TIME;
 
-      // Delay audio start by prep time (only if audio is available)
-      if (this.hasAudio) {
-        setTimeout(() => {
-          if (this.running && !this.state?.paused) {
-            audioManager.play(Math.max(0, -this.state!.song.offset / 1000));
-          }
-        }, this.PREP_TIME);
+      if (this.countdown.isResume) {
+        // Resume: calculate total pause duration and resume audio
+        if (this.pauseTime > 0) {
+          this.totalPauseDuration += performance.now() - this.pauseTime;
+          this.pauseTime = 0;
+        }
+        if (this.hasAudio) {
+          audioManager.resume();
+        }
+      } else {
+        // Initial start: set up timing
+        this.gameStartTime = performance.now();
+        // Add prep time offset so game time starts negative, giving notes time to scroll up
+        this.audioStartOffset = this.state!.song.offset + this.settings.audioOffset - this.PREP_TIME;
+
+        // Delay audio start by prep time (only if audio is available)
+        if (this.hasAudio) {
+          setTimeout(() => {
+            if (this.running && !this.state?.paused) {
+              audioManager.play(Math.max(0, -this.state!.song.offset / 1000));
+            }
+          }, this.PREP_TIME);
+        }
       }
     } else {
       this.countdown.count = currentCount;
@@ -235,13 +297,18 @@ export class GameController {
   private getCurrentGameTime(): number {
     if (this.countdown.active) return -this.PREP_TIME - 1000;
 
+    // When paused, return the frozen pause time
+    if (this.state?.paused && this.pauseTime > 0) {
+      return this.pauseTime - this.gameStartTime - this.totalPauseDuration + this.audioStartOffset;
+    }
+
     // Use audio time as master clock when playing (if audio is available)
     if (this.hasAudio && audioManager.isPlaying) {
       return audioManager.getCurrentTimeMs() + this.audioStartOffset;
     }
 
     // Fallback to performance timing (always used in silent mode)
-    return performance.now() - this.gameStartTime + this.audioStartOffset;
+    return performance.now() - this.gameStartTime - this.totalPauseDuration + this.audioStartOffset;
   }
 
   /**
@@ -255,42 +322,173 @@ export class GameController {
     for (const input of inputs) {
       if (!input.pressed) continue; // Only process key presses
 
-      // Convert input timestamp to game time
-      const inputGameTime = input.timestamp - this.gameStartTime + this.audioStartOffset;
+      // Convert input timestamp to game time (must match getCurrentGameTime calculation)
+      const inputGameTime = input.timestamp - this.gameStartTime - this.totalPauseDuration + this.audioStartOffset;
 
-      // Find matching note
+      // Find matching note (check both tap and hold note heads)
       const note = findMatchingNote(this.state.activeNotes, input.direction, inputGameTime);
 
       if (note) {
-        // Judge the note
+        // Judge the note head
         const judgment = judgeNote(note, inputGameTime);
-        note.judged = true;
-        note.judgment = judgment;
 
-        this.state.judgments.push(judgment);
+        // For hold notes, start the hold instead of marking as fully judged
+        if (note.type === 'hold' && note.holdState) {
+          note.holdState.started = true;
+          note.holdState.isHeld = true;
+          // Don't mark as judged yet - will be judged when completed or dropped
 
-        // Update score
-        const prevCombo = this.scoreState.combo;
-        this.scoreState = applyJudgment(this.scoreState, judgment);
+          this.state.judgments.push(judgment);
 
-        // Update state
-        this.state.combo = this.scoreState.combo;
-        this.state.maxCombo = this.scoreState.maxCombo;
+          // Update score for the head hit
+          const prevCombo = this.scoreState.combo;
+          this.scoreState = applyJudgment(this.scoreState, judgment);
 
-        // Trigger visual feedback
-        this.renderer.triggerReceptorGlow(input.direction, currentTime);
-        this.renderer.setJudgment(judgment.grade, currentTime);
-        this.renderer.addHitEffect(input.direction, judgment.grade, currentTime);
+          // Update state
+          this.state.combo = this.scoreState.combo;
+          this.state.maxCombo = this.scoreState.maxCombo;
 
-        // Emit events
-        this.emit({ type: 'judgment', data: judgment });
+          // Trigger visual feedback
+          this.renderer.triggerReceptorGlow(input.direction, currentTime);
+          this.renderer.triggerBackgroundFlash(input.direction, currentTime);
+          this.renderer.setJudgment(judgment.grade, currentTime, judgment.timingDiff);
+          this.renderer.addHitEffect(input.direction, judgment.grade, currentTime);
 
-        if (prevCombo > 0 && this.scoreState.combo === 0) {
-          this.emit({ type: 'combo-break' });
+          // Record timing for per-direction stats (skip misses)
+          if (judgment.grade !== 'miss') {
+            this.renderer.recordTiming(input.direction, judgment.timingDiff);
+          }
+
+          // Emit events
+          this.emit({ type: 'judgment', data: judgment });
+
+          if (prevCombo > 0 && this.scoreState.combo === 0) {
+            this.emit({ type: 'combo-break' });
+          }
+        } else {
+          // Regular tap note
+          note.judged = true;
+          note.judgment = judgment;
+
+          this.state.judgments.push(judgment);
+
+          // Update score
+          const prevCombo = this.scoreState.combo;
+          this.scoreState = applyJudgment(this.scoreState, judgment);
+
+          // Update state
+          this.state.combo = this.scoreState.combo;
+          this.state.maxCombo = this.scoreState.maxCombo;
+
+          // Trigger visual feedback
+          this.renderer.triggerReceptorGlow(input.direction, currentTime);
+          this.renderer.triggerBackgroundFlash(input.direction, currentTime);
+          this.renderer.setJudgment(judgment.grade, currentTime, judgment.timingDiff);
+          this.renderer.addHitEffect(input.direction, judgment.grade, currentTime);
+
+          // Record timing for per-direction stats (skip misses)
+          if (judgment.grade !== 'miss') {
+            this.renderer.recordTiming(input.direction, judgment.timingDiff);
+          }
+
+          // Emit events
+          this.emit({ type: 'judgment', data: judgment });
+
+          if (prevCombo > 0 && this.scoreState.combo === 0) {
+            this.emit({ type: 'combo-break' });
+          }
         }
       } else {
-        // No matching note - still show receptor press
+        // No matching note - still show receptor press and flash
         this.renderer.triggerReceptorGlow(input.direction, currentTime);
+        this.renderer.triggerBackgroundFlash(input.direction, currentTime);
+      }
+    }
+  }
+
+  /**
+   * Process autoplay - auto-hit notes at perfect timing
+   */
+  private processAutoplay(currentTime: number): void {
+    if (!this.state || !this.scoreState) return;
+
+    // Hit notes that are at the current time (within a small window)
+    for (const note of this.state.activeNotes) {
+      if (note.judged) continue;
+
+      // For hold notes that haven't started yet
+      if (note.type === 'hold' && note.holdState && !note.holdState.started) {
+        const timeDiff = currentTime - note.time;
+        if (timeDiff >= -5 && timeDiff <= 20) {
+          // Start the hold
+          note.holdState.started = true;
+          note.holdState.isHeld = true;
+
+          // Create a "marvelous" judgment for the head hit
+          const judgment = {
+            noteId: note.id,
+            timingDiff: Math.random() * 10 - 5,
+            grade: 'marvelous' as const,
+            time: currentTime,
+          };
+
+          this.state.judgments.push(judgment);
+
+          // Update score
+          this.scoreState = applyJudgment(this.scoreState, judgment);
+          this.state.combo = this.scoreState.combo;
+          this.state.maxCombo = this.scoreState.maxCombo;
+
+          // Trigger visual feedback
+          this.renderer.triggerReceptorGlow(note.direction, currentTime);
+          this.renderer.triggerBackgroundFlash(note.direction, currentTime);
+          this.renderer.setJudgment(judgment.grade, currentTime, judgment.timingDiff);
+          this.renderer.addHitEffect(note.direction, judgment.grade, currentTime);
+
+          // Emit events
+          this.emit({ type: 'judgment', data: judgment });
+        }
+        continue;
+      }
+
+      // For active holds in autoplay - keep them held until completion
+      if (note.type === 'hold' && note.holdState?.started && !note.holdState?.completed) {
+        note.holdState.isHeld = true;
+        continue;
+      }
+
+      // For tap notes
+      if (note.type !== 'hold') {
+        // Auto-hit notes that are within 5ms of current time (nearly perfect)
+        const timeDiff = currentTime - note.time;
+        if (timeDiff >= -5 && timeDiff <= 20) {
+          // Create a "marvelous" judgment with tiny timing diff
+          const judgment = {
+            noteId: note.id,
+            timingDiff: Math.random() * 10 - 5, // Slight variation for realism
+            grade: 'marvelous' as const,
+            time: currentTime,
+          };
+
+          note.judged = true;
+          note.judgment = judgment;
+
+          this.state.judgments.push(judgment);
+
+          // Update score
+          this.scoreState = applyJudgment(this.scoreState, judgment);
+          this.state.combo = this.scoreState.combo;
+          this.state.maxCombo = this.scoreState.maxCombo;
+
+          // Trigger visual feedback
+          this.renderer.triggerReceptorGlow(note.direction, currentTime);
+          this.renderer.triggerBackgroundFlash(note.direction, currentTime);
+          this.renderer.setJudgment(judgment.grade, currentTime, judgment.timingDiff);
+          this.renderer.addHitEffect(note.direction, judgment.grade, currentTime);
+
+          // Emit events
+          this.emit({ type: 'judgment', data: judgment });
+        }
       }
     }
   }
@@ -304,8 +502,16 @@ export class GameController {
     for (const note of this.state.activeNotes) {
       if (note.judged) continue;
 
+      // For hold notes, only check the head timing
+      if (note.type === 'hold' && note.holdState?.started) continue;
+
       if (isNoteMissed(note.time, currentTime)) {
         note.judged = true;
+
+        // For hold notes, also mark as dropped
+        if (note.type === 'hold' && note.holdState) {
+          note.holdState.dropped = true;
+        }
 
         const judgment = {
           noteId: note.id,
@@ -338,17 +544,152 @@ export class GameController {
   }
 
   /**
+   * Update hold notes - check if still being held, mark completed or dropped
+   */
+  private updateHolds(currentTime: number): void {
+    if (!this.state || !this.scoreState) return;
+
+    const heldDirections = inputManager.getHeldDirections();
+
+    for (const note of this.state.activeNotes) {
+      if (note.type !== 'hold') continue;
+      if (!note.holdState) continue;
+      if (note.holdState.completed || note.holdState.dropped) continue;
+
+      // Update isHeld status
+      const isCurrentlyHeld = heldDirections.includes(note.direction);
+      note.holdState.isHeld = isCurrentlyHeld;
+
+      // If hold has started, check for drop or completion
+      if (note.holdState.started) {
+        // Calculate progress
+        const endTime = note.endTime ?? note.time;
+        const duration = endTime - note.time;
+        note.holdState.progress = Math.min(1, (currentTime - note.time) / duration);
+
+        // Grace window for releasing hold (generous window for comfort)
+        const holdGraceWindow = 200;
+
+        // Check for release
+        if (!isCurrentlyHeld) {
+          const timeUntilEnd = endTime - currentTime;
+
+          if (timeUntilEnd > holdGraceWindow) {
+            // Released too early - dropped the hold
+            note.holdState.dropped = true;
+            note.judged = true;
+
+            const judgment = {
+              noteId: note.id,
+              timingDiff: currentTime - endTime,
+              grade: 'boo' as const,
+              time: currentTime,
+            };
+
+            this.state.judgments.push(judgment);
+
+            // Update score
+            const prevCombo = this.scoreState.combo;
+            this.scoreState = applyJudgment(this.scoreState, judgment);
+
+            this.state.combo = this.scoreState.combo;
+            this.state.maxCombo = this.scoreState.maxCombo;
+
+            // Visual feedback
+            this.renderer.setJudgment('boo', currentTime);
+
+            // Emit events
+            this.emit({ type: 'judgment', data: judgment });
+
+            if (prevCombo > 0) {
+              this.emit({ type: 'combo-break' });
+            }
+          } else {
+            // Released within grace window - complete the hold successfully
+            note.holdState.completed = true;
+            note.holdState.progress = 1;
+            note.judged = true;
+
+            const judgment = {
+              noteId: note.id,
+              timingDiff: -timeUntilEnd, // Negative = early
+              grade: 'perfect' as const,
+              time: currentTime,
+            };
+
+            this.state.judgments.push(judgment);
+            this.scoreState = applyJudgment(this.scoreState, judgment);
+            this.state.combo = this.scoreState.combo;
+            this.state.maxCombo = this.scoreState.maxCombo;
+
+            this.renderer.setJudgment('perfect', currentTime, -timeUntilEnd);
+            this.renderer.addHitEffect(note.direction, 'perfect', currentTime);
+          }
+        }
+
+        // Check for completion (held all the way)
+        if (currentTime >= endTime && !note.holdState.dropped && !note.holdState.completed) {
+          note.holdState.completed = true;
+          note.holdState.progress = 1;
+          note.judged = true;
+
+          // Award OK judgment for completing the hold
+          const judgment = {
+            noteId: note.id,
+            timingDiff: 0,
+            grade: 'perfect' as const, // Completing a hold gives perfect
+            time: currentTime,
+          };
+
+          this.state.judgments.push(judgment);
+
+          // Update score
+          this.scoreState = applyJudgment(this.scoreState, judgment);
+
+          this.state.combo = this.scoreState.combo;
+          this.state.maxCombo = this.scoreState.maxCombo;
+
+          // Visual feedback
+          this.renderer.setJudgment('perfect', currentTime, 0);
+          this.renderer.addHitEffect(note.direction, 'perfect', currentTime);
+        }
+      }
+    }
+  }
+
+  /**
    * Check if song has ended
    */
   private checkSongEnd(currentTime: number): void {
-    if (!this.state) return;
+    if (!this.state || !this.scoreState) return;
+
+    // Force-complete any hold notes that are past their end time
+    for (const note of this.state.activeNotes) {
+      if (note.type !== 'hold' || !note.holdState) continue;
+      if (note.judged || note.holdState.completed || note.holdState.dropped) continue;
+
+      const endTime = note.endTime ?? note.time;
+      if (currentTime > endTime + 200) {
+        // Hold time passed - complete if started, miss if not
+        if (note.holdState.started) {
+          note.holdState.completed = true;
+          note.holdState.progress = 1;
+        } else {
+          note.holdState.dropped = true;
+        }
+        note.judged = true;
+      }
+    }
 
     // Check if all notes are judged
     const allJudged = this.state.activeNotes.every((n) => n.judged);
 
-    // Check if we've passed the last note by a margin
+    // Check if we've passed the last note by a margin (use endTime for holds)
     const lastNote = this.state.activeNotes[this.state.activeNotes.length - 1];
-    const pastLastNote = lastNote ? currentTime > lastNote.time + 2000 : true;
+    const lastNoteEndTime = lastNote
+      ? (lastNote.endTime ?? lastNote.time)
+      : 0;
+    const pastLastNote = lastNote ? currentTime > lastNoteEndTime + 2000 : true;
 
     // Check if audio has ended (only if we have audio)
     let pastAudioEnd = false;
@@ -379,12 +720,29 @@ export class GameController {
   }
 
   /**
+   * Fail the song (lifebar depleted)
+   */
+  private failSong(): void {
+    if (!this.state || this.state.ended) return;
+
+    this.state.ended = true;
+    if (this.hasAudio) {
+      audioManager.stop();
+    }
+    inputManager.stop();
+    this.running = false;
+
+    this.emit({ type: 'song-fail', data: this.getResults() });
+  }
+
+  /**
    * Pause the game
    */
   pause(): void {
     if (!this.state || this.state.paused || this.state.ended || this.countdown.active) return;
 
     this.state.paused = true;
+    this.pauseTime = performance.now(); // Record when we paused
     if (this.hasAudio) {
       audioManager.pause();
     }
@@ -400,10 +758,12 @@ export class GameController {
     if (!this.state || !this.state.paused) return;
 
     // Start a short countdown before resuming
+    // Note: pauseTime stays set - we'll calculate duration when countdown finishes
     this.countdown = {
       active: true,
       count: 3,
       startTime: performance.now(),
+      isResume: true,
     };
 
     this.state.paused = false;

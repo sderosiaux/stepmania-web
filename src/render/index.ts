@@ -99,7 +99,7 @@ export class Renderer {
   };
 
   /** Last judgment to display */
-  private lastJudgment: { grade: JudgmentGrade; time: number } | null = null;
+  private lastJudgment: { grade: JudgmentGrade; time: number; timingDiff: number } | null = null;
 
   /** Current combo for display */
   private displayCombo: number = 0;
@@ -113,6 +113,21 @@ export class Renderer {
 
   /** Health orb bubble animation */
   private healthBubbles: { x: number; y: number; size: number; speed: number; opacity: number }[] = [];
+
+  /** Background flash effects on key press */
+  private backgroundFlashes: { x: number; y: number; color: string; time: number }[] = [];
+
+  /** Per-direction timing offsets for stats display */
+  private directionTimings: Record<Direction, number[]> = {
+    left: [],
+    down: [],
+    up: [],
+    right: [],
+  };
+
+  /** Smoothed health for gradual background transitions */
+  private smoothedHealth: number = 50;
+  private lastFrameTime: number = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -163,11 +178,373 @@ export class Renderer {
   }
 
   /**
-   * Clear the canvas
+   * Clear the canvas with animated gradient background
    */
-  clear(): void {
+  clear(currentTime?: number, health: number = 50): void {
+    // Base dark background
     this.ctx.fillStyle = THEME.bg.primary;
     this.ctx.fillRect(0, 0, this.width, this.height);
+
+    // Animated gradient background (without flashes - those are drawn separately)
+    this.drawAnimatedBackground(currentTime, health);
+  }
+
+  /**
+   * Draw animated gradient background with dim overlay (health-reactive with smooth transitions)
+   */
+  private drawAnimatedBackground(currentTime: number = Date.now(), health: number = 50): void {
+    const time = currentTime / 2000; // Animation speed
+
+    // Calculate delta time for smooth lerping
+    const deltaTime = this.lastFrameTime > 0 ? (currentTime - this.lastFrameTime) / 1000 : 0.016;
+    this.lastFrameTime = currentTime;
+
+    // Smoothly lerp towards target health (faster when dropping, slower when rising)
+    const lerpSpeed = health < this.smoothedHealth ? 8 : 3; // Drop fast, recover slow
+    this.smoothedHealth += (health - this.smoothedHealth) * Math.min(1, deltaTime * lerpSpeed);
+
+    // Use smoothed health for all calculations
+    const h = this.smoothedHealth;
+    const isLowHealth = h < 30;
+    const isHighHealth = h > 75;
+    const isCriticalHealth = h < 15;
+
+    // Pulse speed increases when health is low
+    const pulseSpeed = isCriticalHealth ? 10 : (isLowHealth ? 5 : 1);
+    const pulse = Math.sin(currentTime / (200 / pulseSpeed)) * 0.5 + 0.5;
+
+    // Create moving gradient points
+    const cx1 = this.width * (0.3 + 0.25 * Math.sin(time * 0.7));
+    const cy1 = this.height * (0.3 + 0.25 * Math.cos(time * 0.5));
+    const cx2 = this.width * (0.7 + 0.25 * Math.cos(time * 0.6));
+    const cy2 = this.height * (0.7 + 0.25 * Math.sin(time * 0.8));
+
+    // Define color stops for different health ranges
+    let color1, color2, color3;
+
+    if (isCriticalHealth) {
+      // Critical: intense pulsing red
+      const intensity = 0.5 + pulse * 0.35;
+      color1 = { r: 255, g: 20, b: 20, a: intensity };
+      color2 = { r: 200, g: 0, b: 50, a: intensity * 0.8 };
+      color3 = { r: 255, g: 50, b: 30, a: intensity * 0.6 };
+    } else if (isLowHealth) {
+      // Low: red/orange warning - blend based on how low
+      const lowBlend = (30 - h) / 15; // 0 at 30, 1 at 15
+      const intensity = 0.35 + pulse * 0.15 + lowBlend * 0.1;
+      color1 = {
+        r: Math.round(180 + lowBlend * 75),
+        g: Math.round(80 - lowBlend * 60),
+        b: Math.round(50 - lowBlend * 30),
+        a: intensity
+      };
+      color2 = {
+        r: Math.round(200 + lowBlend * 55),
+        g: Math.round(100 - lowBlend * 80),
+        b: Math.round(20),
+        a: intensity * 0.7
+      };
+      color3 = {
+        r: Math.round(220 + lowBlend * 35),
+        g: Math.round(80 - lowBlend * 50),
+        b: Math.round(40 - lowBlend * 20),
+        a: intensity * 0.5
+      };
+    } else if (isHighHealth) {
+      // High: vibrant green/cyan - more intense
+      const highBlend = (h - 75) / 25; // 0 at 75, 1 at 100
+      color1 = {
+        r: 0,
+        g: Math.round(200 + highBlend * 55),
+        b: Math.round(150 + highBlend * 50),
+        a: 0.4 + highBlend * 0.15
+      };
+      color2 = {
+        r: 0,
+        g: Math.round(180 + highBlend * 40),
+        b: Math.round(200 + highBlend * 30),
+        a: 0.35 + highBlend * 0.1
+      };
+      color3 = {
+        r: Math.round(50 + highBlend * 30),
+        g: Math.round(255),
+        b: Math.round(180 + highBlend * 40),
+        a: 0.3 + highBlend * 0.1
+      };
+    } else {
+      // Normal (30-75): purple/blue/teal - blend between low-warning and high-good
+      const normalBlend = (h - 30) / 45; // 0 at 30, 1 at 75
+      color1 = {
+        r: Math.round(180 - normalBlend * 30),
+        g: Math.round(80 * normalBlend),
+        b: Math.round(100 + normalBlend * 80),
+        a: 0.35
+      };
+      color2 = {
+        r: Math.round(100 - normalBlend * 100),
+        g: Math.round(100 + normalBlend * 50),
+        b: Math.round(180 + normalBlend * 40),
+        a: 0.3
+      };
+      color3 = {
+        r: Math.round(50 - normalBlend * 50),
+        g: Math.round(150 + normalBlend * 50),
+        b: Math.round(180 + normalBlend * 20),
+        a: 0.25
+      };
+    }
+
+    // First gradient blob - larger and more intense
+    const gradient1 = this.ctx.createRadialGradient(
+      cx1, cy1, 0,
+      cx1, cy1, this.width * 0.8
+    );
+    gradient1.addColorStop(0, `rgba(${color1.r}, ${color1.g}, ${color1.b}, ${color1.a})`);
+    gradient1.addColorStop(0.3, `rgba(${color1.r}, ${color1.g}, ${color1.b}, ${color1.a * 0.7})`);
+    gradient1.addColorStop(0.6, `rgba(${color1.r}, ${color1.g}, ${color1.b}, ${color1.a * 0.3})`);
+    gradient1.addColorStop(1, 'transparent');
+
+    this.ctx.fillStyle = gradient1;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+
+    // Second gradient blob
+    const gradient2 = this.ctx.createRadialGradient(
+      cx2, cy2, 0,
+      cx2, cy2, this.width * 0.7
+    );
+    gradient2.addColorStop(0, `rgba(${color2.r}, ${color2.g}, ${color2.b}, ${color2.a})`);
+    gradient2.addColorStop(0.35, `rgba(${color2.r}, ${color2.g}, ${color2.b}, ${color2.a * 0.6})`);
+    gradient2.addColorStop(0.7, `rgba(${color2.r}, ${color2.g}, ${color2.b}, ${color2.a * 0.2})`);
+    gradient2.addColorStop(1, 'transparent');
+
+    this.ctx.fillStyle = gradient2;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+
+    // Third gradient blob - moves differently
+    const cx3 = this.width * (0.5 + 0.3 * Math.sin(time * 0.4 + 1));
+    const cy3 = this.height * (0.6 + 0.25 * Math.cos(time * 0.3 + 2));
+
+    const gradient3 = this.ctx.createRadialGradient(
+      cx3, cy3, 0,
+      cx3, cy3, this.width * 0.6
+    );
+    gradient3.addColorStop(0, `rgba(${color3.r}, ${color3.g}, ${color3.b}, ${color3.a})`);
+    gradient3.addColorStop(0.4, `rgba(${color3.r}, ${color3.g}, ${color3.b}, ${color3.a * 0.5})`);
+    gradient3.addColorStop(1, 'transparent');
+
+    this.ctx.fillStyle = gradient3;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+
+    // Dim overlay - less dim for more intense colors
+    const dimOpacity = isCriticalHealth ? 0.25 : (isLowHealth ? 0.32 : (isHighHealth ? 0.35 : 0.4));
+    this.ctx.fillStyle = `rgba(10, 10, 15, ${dimOpacity})`;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  /**
+   * Trigger a background flash effect on key press
+   */
+  triggerBackgroundFlash(direction: Direction, time: number): void {
+    const x = this.columnX[direction];
+    const color = THEME.arrows[direction];
+    this.backgroundFlashes.push({ x, y: this.receptorY, color, time });
+    // Keep only recent flashes
+    this.backgroundFlashes = this.backgroundFlashes.filter(f => time - f.time < 600);
+  }
+
+  /**
+   * Draw receptor flash effects on key press (interior highlight)
+   */
+  drawLaneFlashes(currentTime: number): void {
+    const flashDuration = 120; // Shorter duration
+
+    for (const flash of this.backgroundFlashes) {
+      const elapsed = currentTime - flash.time;
+      if (elapsed > flashDuration) continue;
+
+      const progress = elapsed / flashDuration;
+      // Reduced opacity - start at 0.5 and fade out quickly
+      const alpha = 0.5 * (1 - progress * progress);
+
+      // Get direction from x position
+      let dir: Direction = 'left';
+      for (const d of DIRECTIONS) {
+        if (Math.abs(this.columnX[d] - flash.x) < 5) {
+          dir = d;
+          break;
+        }
+      }
+
+      // Draw filled arrow interior
+      this.ctx.save();
+      this.ctx.translate(flash.x, this.receptorY);
+
+      const rotations: Record<Direction, number> = {
+        up: 0,
+        down: Math.PI,
+        left: -Math.PI / 2,
+        right: Math.PI / 2,
+      };
+      this.ctx.rotate(rotations[dir]);
+
+      const s = LAYOUT.arrowSize / 2 * 0.85; // Slightly smaller
+
+      // Arrow shape path
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, -s * 0.95);
+      this.ctx.lineTo(s * 0.95, s * 0.1);
+      this.ctx.lineTo(s * 0.35, s * 0.1);
+      this.ctx.lineTo(s * 0.35, s * 0.95);
+      this.ctx.lineTo(-s * 0.35, s * 0.95);
+      this.ctx.lineTo(-s * 0.35, s * 0.1);
+      this.ctx.lineTo(-s * 0.95, s * 0.1);
+      this.ctx.closePath();
+
+      // Fill with the arrow's color (subtle highlight, not white)
+      const baseColor = this.hexToRgb(flash.color);
+      // Only lighten slightly instead of going near-white
+      const r = Math.min(255, baseColor.r + 40);
+      const g = Math.min(255, baseColor.g + 40);
+      const b = Math.min(255, baseColor.b + 40);
+      this.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      this.ctx.fill();
+
+      this.ctx.restore();
+    }
+  }
+
+  /**
+   * Convert hex to RGB object
+   */
+  private hexToRgb(hex: string): { r: number; g: number; b: number } {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return { r, g, b };
+  }
+
+  /**
+   * Record a timing offset for a direction
+   */
+  recordTiming(direction: Direction, timingDiff: number): void {
+    this.directionTimings[direction].push(timingDiff);
+    // Keep only last 50 timings per direction
+    if (this.directionTimings[direction].length > 50) {
+      this.directionTimings[direction].shift();
+    }
+  }
+
+  /**
+   * Reset timing stats and background state (for new game)
+   */
+  resetTimings(): void {
+    this.directionTimings = {
+      left: [],
+      down: [],
+      up: [],
+      right: [],
+    };
+    // Reset smoothed health to starting value
+    this.smoothedHealth = 50;
+    this.lastFrameTime = 0;
+  }
+
+  /**
+   * Draw per-direction timing stats with visual slider bars
+   */
+  drawTimingStats(): void {
+    const statsX = this.columnX.right + LAYOUT.arrowSize / 2 + 25;
+    const startY = this.receptorY - 30;
+    const rowHeight = 28;
+    const barWidth = 80;
+    const barHeight = 6;
+
+    this.ctx.save();
+
+    // Title
+    this.ctx.font = '10px -apple-system, sans-serif';
+    this.ctx.fillStyle = THEME.text.muted;
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText('TIMING', statsX, startY - 5);
+
+    for (let i = 0; i < DIRECTIONS.length; i++) {
+      const dir = DIRECTIONS[i]!;
+      const timings = this.directionTimings[dir];
+      const y = startY + i * rowHeight + 18;
+
+      // Direction indicator with color
+      this.ctx.fillStyle = THEME.arrows[dir];
+      this.ctx.font = '14px -apple-system, sans-serif';
+      const arrow = dir === 'left' ? '←' : dir === 'down' ? '↓' : dir === 'up' ? '↑' : '→';
+      this.ctx.fillText(arrow, statsX, y + 4);
+
+      const barX = statsX + 20;
+
+      // Draw bar background
+      this.ctx.fillStyle = THEME.bg.tertiary;
+      this.ctx.fillRect(barX, y - barHeight / 2, barWidth, barHeight);
+
+      // Draw center line (perfect timing)
+      this.ctx.fillStyle = THEME.text.muted;
+      this.ctx.fillRect(barX + barWidth / 2 - 0.5, y - barHeight / 2 - 2, 1, barHeight + 4);
+
+      // Draw "EARLY" and "LATE" labels (small)
+      this.ctx.font = '7px -apple-system, sans-serif';
+      this.ctx.fillStyle = THEME.text.muted;
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText('E', barX - 8, y + 2);
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText('L', barX + barWidth + 8, y + 2);
+
+      if (timings.length > 0) {
+        // Calculate average
+        const avg = timings.reduce((a, b) => a + b, 0) / timings.length;
+        const avgMs = Math.round(avg);
+
+        // Map timing to position (-100ms to +100ms range)
+        const maxOffset = 100;
+        const clampedAvg = Math.max(-maxOffset, Math.min(maxOffset, avg));
+        const normalizedPos = (clampedAvg + maxOffset) / (maxOffset * 2); // 0 to 1
+        const indicatorX = barX + normalizedPos * barWidth;
+
+        // Color based on early/late
+        let color: string;
+        if (avgMs < -10) {
+          color = '#4fc3f7'; // Early - blue
+        } else if (avgMs > 10) {
+          color = '#ff7043'; // Late - orange
+        } else {
+          color = '#66bb6a'; // Good - green
+        }
+
+        // Draw indicator triangle
+        this.ctx.fillStyle = color;
+        this.ctx.beginPath();
+        this.ctx.moveTo(indicatorX, y - barHeight / 2 - 1);
+        this.ctx.lineTo(indicatorX - 4, y - barHeight / 2 - 6);
+        this.ctx.lineTo(indicatorX + 4, y - barHeight / 2 - 6);
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        // Draw indicator line
+        this.ctx.fillRect(indicatorX - 1, y - barHeight / 2, 2, barHeight);
+
+        // Draw ms value
+        this.ctx.font = '9px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = color;
+        const sign = avgMs >= 0 ? '+' : '';
+        this.ctx.fillText(`${sign}${avgMs}`, indicatorX, y + barHeight / 2 + 10);
+      } else {
+        // No data yet
+        this.ctx.font = '9px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = THEME.text.muted;
+        this.ctx.fillText('--', barX + barWidth / 2, y + barHeight / 2 + 10);
+      }
+    }
+
+    this.ctx.restore();
   }
 
   /**
@@ -203,8 +580,6 @@ export class Renderer {
    * Draw receptors (target arrows at top)
    */
   drawReceptors(currentTime: number, heldDirections: Set<Direction>): void {
-    const size = LAYOUT.arrowSize;
-
     for (const dir of DIRECTIONS) {
       const x = this.columnX[dir];
       const y = this.receptorY;
@@ -380,7 +755,24 @@ export class Renderer {
     // Calculate look-ahead time based on screen height
     const lookAheadMs = this.height / pixelsPerMs;
 
+    // Draw hold notes first (so tap notes render on top)
     for (const note of notes) {
+      if (note.type !== 'hold') continue;
+      if (note.holdState?.completed || note.holdState?.dropped) continue;
+
+      const timeDiff = note.time - currentTime;
+      const endTimeDiff = (note.endTime ?? note.time) - currentTime;
+
+      // Skip if entirely off screen
+      if (timeDiff > lookAheadMs) continue;
+      if (endTimeDiff < -500) continue;
+
+      this.drawHoldNote(note, currentTime, pixelsPerMs);
+    }
+
+    // Draw tap notes
+    for (const note of notes) {
+      if (note.type === 'hold') continue;
       if (note.judged) continue;
 
       const timeDiff = note.time - currentTime;
@@ -406,10 +798,123 @@ export class Renderer {
   }
 
   /**
+   * Draw a hold/freeze note
+   */
+  private drawHoldNote(note: Note, currentTime: number, pixelsPerMs: number): void {
+    const x = this.columnX[note.direction];
+    const color = THEME.arrows[note.direction];
+    const holdState = note.holdState;
+
+    // Calculate positions
+    const headTimeDiff = note.time - currentTime;
+    const tailTimeDiff = (note.endTime ?? note.time) - currentTime;
+
+    let headY = this.receptorY + headTimeDiff * pixelsPerMs;
+    const tailY = this.receptorY + tailTimeDiff * pixelsPerMs;
+
+    // If hold started, keep head locked at receptor (don't let it scroll past)
+    if (holdState?.started && !holdState?.dropped) {
+      headY = this.receptorY;
+    }
+
+    // Determine hold state for coloring
+    const isActive = holdState?.isHeld && holdState?.started && !holdState?.completed;
+    const isDropped = holdState?.dropped;
+    const bodyWidth = LAYOUT.arrowSize * 0.45;
+
+    this.ctx.save();
+
+    // Draw hold body (from head to tail)
+    const bodyTop = Math.min(headY, tailY);
+    const bodyBottom = Math.max(headY, tailY);
+    const bodyHeight = bodyBottom - bodyTop;
+
+    if (bodyHeight > 0) {
+      // Body gradient
+      const bodyGradient = this.ctx.createLinearGradient(x - bodyWidth / 2, 0, x + bodyWidth / 2, 0);
+
+      if (isDropped) {
+        // Dropped: gray/dark
+        bodyGradient.addColorStop(0, '#333344');
+        bodyGradient.addColorStop(0.5, '#444455');
+        bodyGradient.addColorStop(1, '#333344');
+      } else if (isActive) {
+        // Active: bright glowing
+        const rgb = this.hexToRgb(color);
+        bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
+        bodyGradient.addColorStop(0.5, `rgba(${Math.min(255, rgb.r + 80)}, ${Math.min(255, rgb.g + 80)}, ${Math.min(255, rgb.b + 80)}, 1)`);
+        bodyGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
+
+        // Glow effect
+        this.ctx.shadowColor = color;
+        this.ctx.shadowBlur = 15;
+      } else {
+        // Idle: normal color
+        const rgb = this.hexToRgb(color);
+        bodyGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
+        bodyGradient.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`);
+        bodyGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
+      }
+
+      // Draw body rectangle
+      this.ctx.fillStyle = bodyGradient;
+      this.roundRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight, 4);
+      this.ctx.fill();
+
+      // Inner glow stripe
+      if (!isDropped) {
+        const innerWidth = bodyWidth * 0.3;
+        const innerGradient = this.ctx.createLinearGradient(x - innerWidth / 2, 0, x + innerWidth / 2, 0);
+        innerGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        innerGradient.addColorStop(0.5, `rgba(255, 255, 255, ${isActive ? 0.5 : 0.2})`);
+        innerGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+        this.ctx.fillStyle = innerGradient;
+        this.ctx.fillRect(x - innerWidth / 2, bodyTop + 4, innerWidth, bodyHeight - 8);
+      }
+
+      this.ctx.shadowBlur = 0;
+    }
+
+    // Draw head - always visible while holding, fades when dropped
+    if (!holdState?.completed) {
+      const headAlpha = isDropped ? 0.4 : 1;
+      this.drawArrow(x, headY, note.direction, headAlpha);
+    }
+
+    // Draw tail cap
+    if (tailY > 0 && tailY < this.height + LAYOUT.arrowSize) {
+      const capHeight = LAYOUT.arrowSize * 0.3;
+      const capGradient = this.ctx.createLinearGradient(0, tailY - capHeight, 0, tailY);
+
+      if (isDropped) {
+        capGradient.addColorStop(0, '#444455');
+        capGradient.addColorStop(1, '#333344');
+      } else {
+        const rgb = this.hexToRgb(color);
+        capGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`);
+        capGradient.addColorStop(1, this.darkenColor(color, 30));
+      }
+
+      this.ctx.fillStyle = capGradient;
+      this.roundRect(x - bodyWidth / 2, tailY - capHeight, bodyWidth, capHeight, 4);
+      this.ctx.fill();
+
+      // Cap border
+      this.ctx.strokeStyle = isDropped ? '#555566' : this.darkenColor(color, 20);
+      this.ctx.lineWidth = 2;
+      this.roundRect(x - bodyWidth / 2, tailY - capHeight, bodyWidth, capHeight, 4);
+      this.ctx.stroke();
+    }
+
+    this.ctx.restore();
+  }
+
+  /**
    * Update and draw judgment display
    */
-  setJudgment(grade: JudgmentGrade, time: number): void {
-    this.lastJudgment = { grade, time };
+  setJudgment(grade: JudgmentGrade, time: number, timingDiff: number = 0): void {
+    this.lastJudgment = { grade, time, timingDiff };
   }
 
   /**
@@ -491,7 +996,7 @@ export class Renderer {
   }
 
   /**
-   * Draw judgment text
+   * Draw judgment text with timing offset indicator
    */
   drawJudgment(currentTime: number): void {
     if (!this.lastJudgment) return;
@@ -506,6 +1011,8 @@ export class Renderer {
 
     const alpha = 1 - elapsed / duration;
     const scale = 1 + elapsed / duration * 0.2;
+    const centerX = this.width / 2;
+    const centerY = this.height * 0.38;
 
     const text = this.lastJudgment.grade.toUpperCase();
     const color = THEME.judgment[this.lastJudgment.grade];
@@ -518,11 +1025,53 @@ export class Renderer {
 
     // Draw text shadow
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    this.ctx.fillText(text, this.width / 2 + 2, this.height * 0.4 + 2);
+    this.ctx.fillText(text, centerX + 2, centerY + 2);
 
-    // Draw text
+    // Draw judgment text
     this.ctx.fillStyle = color;
-    this.ctx.fillText(text, this.width / 2, this.height * 0.4);
+    this.ctx.fillText(text, centerX, centerY);
+
+    // Draw timing offset indicator (skip for misses)
+    if (this.lastJudgment.grade !== 'miss') {
+      const timingDiff = this.lastJudgment.timingDiff;
+      const maxOffset = 150; // Max timing window in ms
+
+      // Timing bar background
+      const barWidth = 120;
+      const barHeight = 4;
+      const barY = centerY + 28;
+
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      this.roundRect(centerX - barWidth / 2, barY, barWidth, barHeight, 2);
+      this.ctx.fill();
+
+      // Center line (perfect timing)
+      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(centerX, barY - 2);
+      this.ctx.lineTo(centerX, barY + barHeight + 2);
+      this.ctx.stroke();
+
+      // Timing indicator position
+      const indicatorX = centerX + (timingDiff / maxOffset) * (barWidth / 2);
+      const clampedX = Math.max(centerX - barWidth / 2 + 3, Math.min(centerX + barWidth / 2 - 3, indicatorX));
+
+      // Timing indicator
+      this.ctx.fillStyle = color;
+      this.ctx.beginPath();
+      this.ctx.arc(clampedX, barY + barHeight / 2, 5, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Early/Late text
+      if (Math.abs(timingDiff) > 15) {
+        this.ctx.font = 'bold 11px -apple-system, sans-serif';
+        const offsetText = timingDiff < 0 ? 'EARLY' : 'LATE';
+        const offsetColor = timingDiff < 0 ? '#88ccff' : '#ffaa66';
+        this.ctx.fillStyle = offsetColor;
+        this.ctx.fillText(offsetText, centerX, barY + 18);
+      }
+    }
 
     this.ctx.restore();
   }
@@ -660,94 +1209,50 @@ export class Renderer {
   }
 
   /**
-   * Draw progress bar (centered, Diablo 3 fluid style)
+   * Draw progress bar (centered, matching lane width)
    */
   drawProgress(current: number, total: number): void {
     if (total <= 0) return;
 
     const progress = Math.min(1, Math.max(0, current / total));
+    const barHeight = 6;
     const barWidth = LAYOUT.arrowSize * 4 + LAYOUT.arrowGap * 3;
-    const barHeight = 10;
     const x = (this.width - barWidth) / 2;
-    const y = this.height - 32;
-    const radius = 5;
+    const y = 12;
+    const radius = 3;
 
     this.ctx.save();
 
-    // Background with glass effect
-    const bgGradient = this.ctx.createLinearGradient(x, y, x, y + barHeight);
-    bgGradient.addColorStop(0, '#0a0a12');
-    bgGradient.addColorStop(0.5, '#151520');
-    bgGradient.addColorStop(1, '#0a0a12');
-
+    // Dark background with rounded corners
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     this.roundRect(x, y, barWidth, barHeight, radius);
-    this.ctx.fillStyle = bgGradient;
     this.ctx.fill();
 
-    // Progress fill with fluid effect
+    // Progress fill
     if (progress > 0) {
-      // Clipping for fill
-      this.ctx.save();
-      this.roundRect(x + 2, y + 2, barWidth - 4, barHeight - 4, radius - 2);
-      this.ctx.clip();
+      const fillWidth = barWidth * progress;
 
-      const fillWidth = (barWidth - 4) * progress;
-      const waveTime = Date.now() / 300;
+      // Gradient from cyan to magenta
+      const gradient = this.ctx.createLinearGradient(x, y, x + barWidth, y);
+      gradient.addColorStop(0, '#00d4ff');
+      gradient.addColorStop(0.5, '#8844ff');
+      gradient.addColorStop(1, '#ff00aa');
 
-      // Liquid gradient (vertical for depth)
-      const liquidGradient = this.ctx.createLinearGradient(x, y, x, y + barHeight);
-      liquidGradient.addColorStop(0, '#2266cc');
-      liquidGradient.addColorStop(0.3, '#4488ff');
-      liquidGradient.addColorStop(0.5, '#66aaff');
-      liquidGradient.addColorStop(0.7, '#4488ff');
-      liquidGradient.addColorStop(1, '#2266cc');
-
-      // Draw liquid with wave on right edge
-      this.ctx.beginPath();
-      this.ctx.moveTo(x + 2, y + 2);
-
-      // Top edge
-      this.ctx.lineTo(x + 2 + fillWidth - 3, y + 2);
-
-      // Right edge with wave
-      for (let wy = 0; wy <= barHeight - 4; wy += 2) {
-        const waveX = x + 2 + fillWidth + Math.sin(waveTime + wy * 0.5) * 2;
-        this.ctx.lineTo(waveX, y + 2 + wy);
-      }
-
-      // Bottom and left edges
-      this.ctx.lineTo(x + 2, y + barHeight - 2);
-      this.ctx.closePath();
-
-      this.ctx.fillStyle = liquidGradient;
+      this.ctx.fillStyle = gradient;
+      this.roundRect(x, y, fillWidth, barHeight, radius);
       this.ctx.fill();
 
-      // Highlight streak on top
-      const streakGradient = this.ctx.createLinearGradient(x, y + 3, x, y + 5);
-      streakGradient.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
-      streakGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-      this.ctx.fillStyle = streakGradient;
-      this.ctx.fillRect(x + 4, y + 3, fillWidth - 6, 2);
-
-      this.ctx.restore();
+      // Bright edge at progress point
+      if (fillWidth > 4) {
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        this.ctx.fillRect(x + fillWidth - 2, y + 1, 2, barHeight - 2);
+      }
     }
 
-    // Glass rim (outer border)
-    const rimGradient = this.ctx.createLinearGradient(x, y, x + barWidth, y + barHeight);
-    rimGradient.addColorStop(0, '#555566');
-    rimGradient.addColorStop(0.5, '#333340');
-    rimGradient.addColorStop(1, '#444455');
-
-    this.ctx.strokeStyle = rimGradient;
-    this.ctx.lineWidth = 2;
-    this.roundRect(x, y, barWidth, barHeight, radius);
-    this.ctx.stroke();
-
-    // Inner highlight
-    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    // Subtle border
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
     this.ctx.lineWidth = 1;
-    this.roundRect(x + 1, y + 1, barWidth - 2, barHeight - 2, radius - 1);
+    this.roundRect(x, y, barWidth, barHeight, radius);
     this.ctx.stroke();
 
     this.ctx.restore();
@@ -824,10 +1329,11 @@ export class Renderer {
   /**
    * Full render frame for gameplay
    */
-  renderGameplay(state: GameplayState, currentTime: number, heldDirections: Set<Direction>, cmod: number = 500, health: number = 50): void {
-    this.clear();
+  renderGameplay(state: GameplayState, currentTime: number, heldDirections: Set<Direction>, cmod: number = 500, health: number = 50, autoplay: boolean = false): void {
+    this.clear(currentTime, health);
     this.drawLanes();
     this.drawReceptors(currentTime, heldDirections);
+    this.drawLaneFlashes(currentTime); // Draw flashes ON TOP of receptors for visibility
     this.drawHitEffects(currentTime);
     this.drawNotes(state.activeNotes, currentTime, cmod, state.song.bpm);
     this.drawJudgment(currentTime);
@@ -835,13 +1341,58 @@ export class Renderer {
     this.drawCombo(currentTime);
     this.drawScore(state.score);
     this.drawHealthBar(health);
-    this.drawCmodIndicator(cmod, state.song.bpm);
-    this.drawDifficulty(state.chart.difficulty, state.chart.level);
-    this.drawProgress(currentTime, state.chart.notes[state.chart.notes.length - 1]?.time ?? 0);
+    this.drawProgress(currentTime, state.chart.notes[state.chart.notes.length - 1]?.endTime ?? state.chart.notes[state.chart.notes.length - 1]?.time ?? 0);
+
+    // Draw timing stats (only in normal play, not autoplay)
+    if (!autoplay) {
+      this.drawTimingStats();
+    }
+
+    if (autoplay) {
+      this.drawAutoplayIndicator();
+    }
 
     if (state.paused) {
       this.drawPauseOverlay();
     }
+  }
+
+  /**
+   * Draw autoplay/demo mode indicator
+   */
+  private drawAutoplayIndicator(): void {
+    this.ctx.save();
+
+    const x = this.width / 2;
+    const y = 50;
+
+    // Pulsing effect
+    const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 300);
+
+    // Background pill
+    const text = 'DEMO';
+    this.ctx.font = 'bold 14px -apple-system, sans-serif';
+    const textWidth = this.ctx.measureText(text).width;
+    const padding = 12;
+
+    this.ctx.fillStyle = `rgba(255, 0, 100, ${0.2 * pulse})`;
+    this.roundRect(x - textWidth / 2 - padding, y - 12, textWidth + padding * 2, 24, 12);
+    this.ctx.fill();
+
+    // Border
+    this.ctx.strokeStyle = `rgba(255, 0, 100, ${0.6 * pulse})`;
+    this.ctx.lineWidth = 2;
+    this.roundRect(x - textWidth / 2 - padding, y - 12, textWidth + padding * 2, 24, 12);
+    this.ctx.stroke();
+
+    // Text
+    this.ctx.globalAlpha = pulse;
+    this.ctx.fillStyle = '#ff0066';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(text, x, y);
+
+    this.ctx.restore();
   }
 
   /**

@@ -85,6 +85,9 @@ export function findMatchingNote(
     // Skip already judged notes
     if (note.judged) continue;
 
+    // Skip hold notes that have already started
+    if (note.type === 'hold' && note.holdState?.started) continue;
+
     const diff = currentTime - note.time;
 
     // Skip notes that are too early

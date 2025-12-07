@@ -194,10 +194,6 @@ function processMeasure(
 
   // Calculate ms per beat (quarter note)
   const msPerBeat = 60000 / bpm;
-  // Each measure is 4 beats
-  const msPerMeasure = msPerBeat * 4;
-  // Time per row in this measure
-  const msPerRow = msPerMeasure / rowCount;
 
   let noteId = noteIdStart;
 
@@ -217,6 +213,7 @@ function processMeasure(
           id: noteId++,
           time,
           direction,
+          type: 'tap',
           judged: false,
         });
       }

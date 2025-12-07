@@ -2,8 +2,8 @@ import type { Song, Chart, GameScreen, ResultsData, Settings } from './types';
 import { DEFAULT_SETTINGS } from './types';
 import { audioManager } from './audio';
 import { GameController } from './core/game';
-import { loadAllSongs, createDemoSong } from './core/loader';
-import { SongSelectScreen } from './ui/song-select';
+import { loadAllSongs, createDemoSongs } from './core/loader';
+import { SongSelectScreen, saveScore } from './ui/song-select';
 import { ResultsScreen } from './ui/results';
 
 // ============================================================================
@@ -37,6 +37,7 @@ class App {
     // Initialize screens
     this.songSelectScreen = new SongSelectScreen(this.uiContainer, {
       onSongSelect: (song, chart, settings) => this.startGame(song, chart, settings),
+      onDemo: (song, chart, settings) => this.startGame(song, chart, settings, true),
     });
 
     this.resultsScreen = new ResultsScreen(this.uiContainer, {
@@ -53,50 +54,24 @@ class App {
    */
   async init(): Promise<void> {
     try {
-      // Initialize audio (requires user interaction in most browsers)
-      await this.waitForUserInteraction();
-      await audioManager.init();
+      // Initialize audio in background (will activate on first user interaction)
+      audioManager.init().catch(() => {
+        // Audio init may fail until user interacts - that's fine
+      });
 
-      // Load songs
-      this.songs = await loadAllSongs();
+      // Load songs from disk
+      const loadedSongs = await loadAllSongs();
 
-      // Add demo song if no songs found
-      if (this.songs.length === 0) {
-        this.songs.push(createDemoSong());
-      }
+      // Always include demo songs, plus any loaded songs
+      this.songs = [...createDemoSongs(), ...loadedSongs];
 
-      // Hide loading, show song select
+      // Hide loading, show song select immediately
       this.hideLoading();
       this.showSongSelect();
     } catch (error) {
       console.error('Failed to initialize:', error);
       this.showError('Failed to initialize. Please refresh the page.');
     }
-  }
-
-  /**
-   * Wait for user interaction (needed for audio autoplay policy)
-   */
-  private waitForUserInteraction(): Promise<void> {
-    return new Promise((resolve) => {
-      const handler = () => {
-        document.removeEventListener('click', handler);
-        document.removeEventListener('keydown', handler);
-        resolve();
-      };
-
-      // Check if we already have interaction
-      if (document.hasFocus()) {
-        // Add click/key prompt
-        const prompt = document.createElement('p');
-        prompt.textContent = 'Click or press any key to start';
-        prompt.style.cssText = 'color: #a0a0b0; margin-top: 1rem;';
-        this.loadingElement.appendChild(prompt);
-      }
-
-      document.addEventListener('click', handler);
-      document.addEventListener('keydown', handler);
-    });
   }
 
   /**
@@ -130,7 +105,12 @@ class App {
   /**
    * Start a game
    */
-  private async startGame(song: Song, chart: Chart, settings?: Partial<Settings>): Promise<void> {
+  private async startGame(
+    song: Song,
+    chart: Chart,
+    settings?: Partial<Settings>,
+    autoplay: boolean = false
+  ): Promise<void> {
     this.currentScreen = 'gameplay';
     this.lastPlayedSong = song;
     this.lastPlayedChart = chart;
@@ -150,14 +130,14 @@ class App {
 
     // Listen for game events
     this.gameController.addEventListener((event) => {
-      if (event.type === 'song-end') {
+      if (event.type === 'song-end' || event.type === 'song-fail') {
         this.showResults(event.data as ResultsData);
       }
     });
 
     // Start the game
     try {
-      await this.gameController.start(song, chart);
+      await this.gameController.start(song, chart, autoplay);
     } catch (error) {
       console.error('Failed to start game:', error);
       this.showSongSelect();
@@ -171,6 +151,17 @@ class App {
     this.currentScreen = 'results';
     this.gameController?.stop();
     this.gameController = null;
+
+    // Save score to memory (only if not failed)
+    if (!results.failed) {
+      saveScore(results.song.id, results.chart.difficulty, {
+        grade: results.grade,
+        score: results.score,
+        maxCombo: results.maxCombo,
+        accuracy: results.percentage,
+        date: Date.now(),
+      });
+    }
 
     this.canvas.classList.add('hidden');
     this.uiContainer.classList.remove('hidden');

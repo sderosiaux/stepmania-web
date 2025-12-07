@@ -16,7 +16,7 @@ L...
 ....
 ,
 `;
-      const { song, errors } = parseStpFile(content, 'test');
+      const { song } = parseStpFile(content, 'test');
 
       expect(song).not.toBeNull();
       expect(song!.title).toBe('Test Song');

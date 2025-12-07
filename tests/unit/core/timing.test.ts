@@ -99,6 +99,7 @@ describe('Timing Engine', () => {
       id,
       time,
       direction,
+      type: 'tap',
       judged: false,
     });
 
@@ -147,7 +148,7 @@ describe('Timing Engine', () => {
 
   describe('judgeNote', () => {
     it('creates correct judgment for marvelous', () => {
-      const note: Note = { id: 1, time: 1000, direction: 'left', judged: false };
+      const note: Note = { id: 1, time: 1000, direction: 'left', type: 'tap', judged: false };
       const judgment = judgeNote(note, 1010);
 
       expect(judgment.noteId).toBe(1);
@@ -156,7 +157,7 @@ describe('Timing Engine', () => {
     });
 
     it('creates correct judgment for late hit', () => {
-      const note: Note = { id: 1, time: 1000, direction: 'left', judged: false };
+      const note: Note = { id: 1, time: 1000, direction: 'left', type: 'tap', judged: false };
       const judgment = judgeNote(note, 1100);
 
       expect(judgment.timingDiff).toBe(100);
@@ -164,7 +165,7 @@ describe('Timing Engine', () => {
     });
 
     it('creates correct judgment for early hit', () => {
-      const note: Note = { id: 1, time: 1000, direction: 'left', judged: false };
+      const note: Note = { id: 1, time: 1000, direction: 'left', type: 'tap', judged: false };
       const judgment = judgeNote(note, 920);
 
       expect(judgment.timingDiff).toBe(-80);
