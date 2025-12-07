@@ -212,6 +212,7 @@ export class SongSelectScreen {
   private activeColumn: 'packs' | 'songs' | 'difficulties' = 'packs';
   private callbacks: SongSelectCallbacks;
   private boundKeyHandler: (e: KeyboardEvent) => void;
+  private boundKeyUpHandler: (e: KeyboardEvent) => void;
   private hasBeenShown: boolean = false;
   private pendingRadarData: GrooveRadar | null = null;
   private currentPreviewSongId: string | null = null;
@@ -221,6 +222,7 @@ export class SongSelectScreen {
     this.container = container;
     this.callbacks = callbacks;
     this.boundKeyHandler = this.handleKey.bind(this);
+    this.boundKeyUpHandler = this.handleKeyUp.bind(this);
     this.cmod = this.loadCmod();
     this.audioOffset = this.loadAudioOffset();
   }
@@ -278,10 +280,12 @@ export class SongSelectScreen {
 
     this.render();
     window.addEventListener('keydown', this.boundKeyHandler);
+    window.addEventListener('keyup', this.boundKeyUpHandler);
   }
 
   hide(): void {
     window.removeEventListener('keydown', this.boundKeyHandler);
+    window.removeEventListener('keyup', this.boundKeyUpHandler);
     this.container.innerHTML = '';
     this.stopPreview();
   }
@@ -360,6 +364,17 @@ export class SongSelectScreen {
     }
   }
 
+  private setGlowSpeed(multiplier: number): void {
+    document.documentElement.style.setProperty('--glow-speed', `${2 / multiplier}s`);
+  }
+
+  private handleKeyUp(e: KeyboardEvent): void {
+    if (e.code === 'Tab') {
+      e.preventDefault();
+      this.setGlowSpeed(1);
+    }
+  }
+
   private cycleDifficultyFilter(direction: number): void {
     const currentIndex = DIFFICULTY_FILTERS.indexOf(this.difficultyFilter);
     let newIndex = currentIndex + direction;
@@ -380,7 +395,13 @@ export class SongSelectScreen {
       if (!packMap.has(packName)) packMap.set(packName, []);
       packMap.get(packName)!.push(song);
     }
-    return Array.from(packMap.entries()).map(([name, songs]) => ({ name, songs }));
+    // Sort packs alphabetically, and songs within each pack alphabetically
+    return Array.from(packMap.entries())
+      .map(([name, packSongs]) => ({
+        name,
+        songs: packSongs.sort((a, b) => a.title.localeCompare(b.title))
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   private handleKey(e: KeyboardEvent): void {
@@ -405,8 +426,7 @@ export class SongSelectScreen {
           this.render();
         } else if (this.activeColumn === 'difficulties' && currentSong) {
           this.selectedDifficultyIndex = Math.max(0, this.selectedDifficultyIndex - 1);
-          this.updateSelection();
-          this.updateChartDetails();
+          this.render();
         }
         break;
 
@@ -427,8 +447,7 @@ export class SongSelectScreen {
           this.render();
         } else if (this.activeColumn === 'difficulties' && currentSong) {
           this.selectedDifficultyIndex = Math.min(currentSong.charts.length - 1, this.selectedDifficultyIndex + 1);
-          this.updateSelection();
-          this.updateChartDetails();
+          this.render();
         }
         break;
 
@@ -468,13 +487,7 @@ export class SongSelectScreen {
 
       case 'Tab':
         e.preventDefault();
-        if (e.shiftKey) {
-          this.cmod = Math.max(0, this.cmod - 50);
-        } else {
-          this.cmod = Math.min(2000, this.cmod + 50);
-        }
-        this.saveCmod();
-        this.render();
+        this.setGlowSpeed(3);
         break;
 
       case 'KeyD':
@@ -530,8 +543,8 @@ export class SongSelectScreen {
         <div class="columns">
           <!-- Packs Column -->
           <div class="column packs-column ${this.activeColumn === 'packs' ? 'active' : ''}">
-            <div class="column-header">PACKS</div>
             <div class="column-list">
+              <div class="wheel-border"></div>
               <div class="wheel-viewport" style="--item-height: 44px; --total-items: ${this.packs.length}; --selected-idx: ${this.selectedPackIndex}; --sep-height: 18px">
                 <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc((var(--total-items) * var(--item-height) + var(--sep-height) + var(--selected-idx) * var(--item-height)) * -1))">
                   ${this.packs.length === 0 ? '<div class="empty">No songs</div>' : (() => {
@@ -570,8 +583,8 @@ export class SongSelectScreen {
 
           <!-- Songs Column -->
           <div class="column songs-column ${this.activeColumn === 'songs' ? 'active' : ''}">
-            <div class="column-header">SONGS</div>
             <div class="column-list">
+              <div class="wheel-border"></div>
               <div class="wheel-viewport" style="--item-height: 56px; --total-items: ${currentPack?.songs.length || 0}; --selected-idx: ${this.selectedSongIndex}; --sep-height: 18px">
                 <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc((var(--total-items) * var(--item-height) + var(--sep-height) + var(--selected-idx) * var(--item-height)) * -1))">
                   ${!currentPack ? '<div class="empty">Select a pack</div>' : (() => {
@@ -616,8 +629,8 @@ export class SongSelectScreen {
 
           <!-- Difficulties Column -->
           <div class="column difficulties-column ${this.activeColumn === 'difficulties' ? 'active' : ''}">
-            <div class="column-header">DIFFICULTY</div>
             <div class="column-list">
+              <div class="wheel-border"></div>
               <div class="wheel-viewport" style="--item-height: 52px; --selected-idx: ${this.selectedDifficultyIndex}">
                 <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc(var(--selected-idx) * var(--item-height) * -1))">
                   ${!currentSong ? '<div class="empty">Select a song</div>' : currentSong.charts.map((chart, i) => {
@@ -652,7 +665,6 @@ export class SongSelectScreen {
 
           <!-- Stats Column -->
           <div class="column stats-column">
-            <div class="column-header">CHART INFO</div>
             ${currentChart ? this.renderChartDetails(currentSong!, currentChart) : '<div class="empty">Select a difficulty</div>'}
           </div>
         </div>
@@ -665,9 +677,9 @@ export class SongSelectScreen {
           <div class="nav-hint">
             <span>↑↓ Navigate</span>
             <span>←→ Columns</span>
-            <span>TAB Speed</span>
             <span>ENTER Play</span>
             <span class="demo-hint">D Demo</span>
+            <span class="glow-hint">TAB Turbo</span>
           </div>
         </div>
       </div>
@@ -1109,11 +1121,14 @@ export class SongSelectScreen {
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        border: 2px solid transparent;
-        transition: border-color 0.15s ease;
       }
 
-      .column.active { border-color: ${THEME.accent.primary}; }
+      /* Remove background on wheel columns */
+      .packs-column,
+      .songs-column,
+      .difficulties-column {
+        background: transparent;
+      }
 
       .packs-column { flex: 0 0 220px; }
       .songs-column { flex: 0 0 280px; }
@@ -1145,13 +1160,79 @@ export class SongSelectScreen {
         overflow: hidden;
       }
 
+      /* Curved wheel border - both arcs curve same direction "( item (" */
+      .wheel-border {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 25;
+        overflow: visible;
+        /* Fade out at top and bottom */
+        mask-image: linear-gradient(
+          to bottom,
+          transparent 0%,
+          black 15%,
+          black 85%,
+          transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+          to bottom,
+          transparent 0%,
+          black 15%,
+          black 85%,
+          transparent 100%
+        );
+      }
+
+      .wheel-border::before,
+      .wheel-border::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        width: 8000px;
+        height: 8000px;
+        border: 2px solid transparent;
+        border-radius: 50%;
+        transform: translateY(-50%);
+        transition: border-color 0.2s ease, filter 0.2s ease;
+      }
+
+      /* Left arc "(" */
+      .wheel-border::before {
+        left: 2px;
+        border-left-color: rgba(100, 100, 120, 0.4);
+      }
+
+      /* Right arc "(" - positioned so left edge is visible inside container */
+      .wheel-border::after {
+        left: calc(100% - 25px);
+        border-left-color: rgba(100, 100, 120, 0.4);
+      }
+
+      .column.active .wheel-border::before,
+      .column.active .wheel-border::after {
+        border-left-color: ${THEME.accent.primary};
+        animation: arc-glow var(--glow-speed, 2s) ease-in-out infinite;
+      }
+
+      @keyframes arc-glow {
+        0%, 100% {
+          border-left-color: rgba(0, 212, 255, 0.7);
+          filter: drop-shadow(0 0 3px rgba(0, 212, 255, 0.9));
+        }
+        50% {
+          border-left-color: rgba(0, 255, 255, 1);
+          filter: drop-shadow(0 0 6px rgba(0, 255, 255, 1)) drop-shadow(0 0 10px rgba(0, 212, 255, 0.8));
+        }
+      }
+
       .wheel-container {
         position: absolute;
         left: 0;
         right: 0;
         display: flex;
         flex-direction: column;
-        padding: 0 0.5rem;
+        padding: 0 2.25rem 0 0.75rem;
         transform-style: preserve-3d;
         transition: transform 0.25s cubic-bezier(0.23, 1, 0.32, 1);
       }
@@ -1230,8 +1311,27 @@ export class SongSelectScreen {
 
       .list-item:hover { background: ${THEME.bg.tertiary}; }
       .list-item.selected {
-        background: rgba(0, 212, 255, 0.15);
-        border-left: 3px solid ${THEME.accent.primary};
+        background: linear-gradient(135deg, rgba(0, 180, 255, 0.4), rgba(180, 0, 255, 0.3));
+        animation: selected-glow var(--glow-speed, 2s) ease-in-out infinite;
+      }
+
+      @keyframes selected-glow {
+        0%, 100% {
+          box-shadow: inset 0 0 15px rgba(0, 200, 255, 0.3), 0 0 8px rgba(0, 180, 255, 0.4);
+        }
+        50% {
+          box-shadow: inset 0 0 25px rgba(0, 220, 255, 0.5), 0 0 15px rgba(0, 200, 255, 0.6), 0 0 25px rgba(180, 0, 255, 0.3);
+        }
+      }
+
+      .list-item.selected .item-name,
+      .list-item.selected .diff-name {
+        font-size: 1rem;
+        font-weight: 600;
+      }
+
+      .list-item.selected .item-name {
+        color: #fff;
       }
 
       .packs-column .list-item {
@@ -1539,6 +1639,7 @@ export class SongSelectScreen {
       }
 
       .demo-hint { color: ${THEME.accent.secondary}; font-weight: 600; }
+      .glow-hint { color: ${THEME.accent.primary}; font-weight: 600; }
     </style>`;
   }
 }
