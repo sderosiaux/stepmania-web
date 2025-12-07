@@ -223,6 +223,16 @@ export interface GameplayState {
   ended: boolean;
 }
 
+/** Per-direction statistics */
+export interface DirectionStats {
+  /** Number of notes hit in this direction */
+  count: number;
+  /** Average timing offset (negative = early, positive = late) */
+  avgTiming: number;
+  /** All timing offsets for this direction */
+  timings: number[];
+}
+
 /** Results after completing a song */
 export interface ResultsData {
   /** The song played */
@@ -245,6 +255,8 @@ export interface ResultsData {
   failed?: boolean;
   /** Whether the player achieved a full combo (no good/boo/miss) */
   isFullCombo: boolean;
+  /** Per-direction timing stats */
+  directionStats?: Record<Direction, DirectionStats>;
 }
 
 /** User settings */

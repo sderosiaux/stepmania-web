@@ -810,7 +810,10 @@ export class GameController {
   getResults(): ResultsData | null {
     if (!this.state || !this.scoreState) return null;
 
-    return generateResults(this.scoreState, this.state.song, this.state.chart);
+    const results = generateResults(this.scoreState, this.state.song, this.state.chart);
+    // Add direction stats from renderer
+    results.directionStats = this.renderer.getDirectionStats();
+    return results;
   }
 
   /**

@@ -450,6 +450,29 @@ export class Renderer {
   }
 
   /**
+   * Get direction timing stats for results
+   */
+  getDirectionStats(): Record<Direction, { count: number; avgTiming: number; timings: number[] }> {
+    const stats: Record<Direction, { count: number; avgTiming: number; timings: number[] }> = {
+      left: { count: 0, avgTiming: 0, timings: [] },
+      down: { count: 0, avgTiming: 0, timings: [] },
+      up: { count: 0, avgTiming: 0, timings: [] },
+      right: { count: 0, avgTiming: 0, timings: [] },
+    };
+
+    for (const dir of DIRECTIONS) {
+      const timings = this.directionTimings[dir];
+      stats[dir].count = timings.length;
+      stats[dir].timings = [...timings];
+      if (timings.length > 0) {
+        stats[dir].avgTiming = timings.reduce((a, b) => a + b, 0) / timings.length;
+      }
+    }
+
+    return stats;
+  }
+
+  /**
    * Draw per-direction timing stats with visual slider bars
    */
   drawTimingStats(): void {

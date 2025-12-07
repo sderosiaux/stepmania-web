@@ -1,5 +1,6 @@
-import type { ResultsData } from '../types';
+import type { ResultsData, Direction } from '../types';
 import { THEME } from '../render';
+import { DIRECTIONS } from '../types';
 
 // ============================================================================
 // Results Screen
@@ -140,6 +141,8 @@ export class ResultsScreen {
               <span class="stat-value">${results.judgmentCounts.miss}</span>
             </div>
           </div>
+
+          ${this.renderDirectionStats(results)}
 
           <div class="combo-display">
             ${results.isFullCombo ? '<div class="full-combo">★ FULL COMBO ★</div>' : ''}
@@ -414,8 +417,145 @@ export class ResultsScreen {
           10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
           20%, 40%, 60%, 80% { transform: translateX(5px); }
         }
+
+        .direction-stats {
+          background: ${THEME.bg.secondary};
+          padding: 1rem;
+          border-radius: 12px;
+          margin-bottom: 1rem;
+        }
+
+        .direction-stats-title {
+          font-size: 0.75rem;
+          color: ${THEME.text.muted};
+          margin-bottom: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .direction-row {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          margin-bottom: 0.5rem;
+        }
+
+        .direction-row:last-child {
+          margin-bottom: 0;
+        }
+
+        .direction-arrow {
+          font-size: 1.2rem;
+          width: 24px;
+          text-align: center;
+        }
+
+        .direction-count {
+          font-size: 0.85rem;
+          color: ${THEME.text.secondary};
+          width: 35px;
+          text-align: right;
+          font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .timing-bar-container {
+          flex: 1;
+          height: 8px;
+          background: ${THEME.bg.tertiary};
+          border-radius: 4px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .timing-bar-center {
+          position: absolute;
+          left: 50%;
+          top: 0;
+          bottom: 0;
+          width: 2px;
+          background: rgba(255, 255, 255, 0.3);
+          transform: translateX(-50%);
+        }
+
+        .timing-bar-indicator {
+          position: absolute;
+          top: 50%;
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          transform: translate(-50%, -50%);
+          border: 2px solid white;
+        }
+
+        .timing-value {
+          font-size: 0.75rem;
+          width: 45px;
+          text-align: right;
+          font-family: 'SF Mono', Monaco, monospace;
+        }
       </style>
     `;
+  }
+
+  /**
+   * Render direction timing stats
+   */
+  private renderDirectionStats(results: ResultsData): string {
+    if (!results.directionStats) return '';
+
+    const arrowColors: Record<Direction, string> = {
+      left: THEME.arrows.left,
+      down: THEME.arrows.down,
+      up: THEME.arrows.up,
+      right: THEME.arrows.right,
+    };
+
+    const arrowSymbols: Record<Direction, string> = {
+      left: '←',
+      down: '↓',
+      up: '↑',
+      right: '→',
+    };
+
+    let html = '<div class="direction-stats"><div class="direction-stats-title">Timing by Direction</div>';
+
+    for (const dir of DIRECTIONS) {
+      const stats = results.directionStats[dir];
+      const color = arrowColors[dir];
+      const arrow = arrowSymbols[dir];
+
+      // Calculate position on bar (-100ms to +100ms range, centered at 50%)
+      const maxOffset = 100;
+      const clampedAvg = Math.max(-maxOffset, Math.min(maxOffset, stats.avgTiming));
+      const position = 50 + (clampedAvg / maxOffset) * 50; // 0% to 100%
+
+      // Color based on timing
+      let indicatorColor = '#66bb6a'; // Good - green
+      if (stats.avgTiming < -15) {
+        indicatorColor = '#4fc3f7'; // Early - blue
+      } else if (stats.avgTiming > 15) {
+        indicatorColor = '#ff7043'; // Late - orange
+      }
+
+      const avgMs = Math.round(stats.avgTiming);
+      const sign = avgMs >= 0 ? '+' : '';
+      const timingText = stats.count > 0 ? `${sign}${avgMs}ms` : '--';
+
+      html += `
+        <div class="direction-row">
+          <span class="direction-arrow" style="color: ${color}">${arrow}</span>
+          <span class="direction-count">${stats.count}</span>
+          <div class="timing-bar-container">
+            <div class="timing-bar-center"></div>
+            ${stats.count > 0 ? `<div class="timing-bar-indicator" style="left: ${position}%; background: ${indicatorColor};"></div>` : ''}
+          </div>
+          <span class="timing-value" style="color: ${indicatorColor}">${timingText}</span>
+        </div>
+      `;
+    }
+
+    html += '</div>';
+    return html;
   }
 
   /**
