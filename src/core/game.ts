@@ -280,6 +280,7 @@ export class GameController {
         // Trigger visual feedback
         this.renderer.triggerReceptorGlow(input.direction, currentTime);
         this.renderer.setJudgment(judgment.grade, currentTime);
+        this.renderer.addHitEffect(input.direction, judgment.grade, currentTime);
 
         // Emit events
         this.emit({ type: 'judgment', data: judgment });

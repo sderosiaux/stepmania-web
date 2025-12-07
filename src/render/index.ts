@@ -104,6 +104,16 @@ export class Renderer {
   /** Current combo for display */
   private displayCombo: number = 0;
 
+
+  /** Time when combo last increased */
+  private comboIncreaseTime: number = 0;
+
+  /** Hit effects queue */
+  private hitEffects: { direction: Direction; grade: JudgmentGrade; time: number }[] = [];
+
+  /** Health orb bubble animation */
+  private healthBubbles: { x: number; y: number; size: number; speed: number; opacity: number }[] = [];
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d');
@@ -403,6 +413,84 @@ export class Renderer {
   }
 
   /**
+   * Add a hit effect at a direction
+   */
+  addHitEffect(direction: Direction, grade: JudgmentGrade, time: number): void {
+    this.hitEffects.push({ direction, grade, time });
+    // Keep only recent effects
+    this.hitEffects = this.hitEffects.filter(e => time - e.time < 500);
+  }
+
+  /**
+   * Draw hit effects (expanding arrow flash at receptors)
+   */
+  drawHitEffects(currentTime: number): void {
+    const effectDuration = 150; // Quick effect
+
+    for (const effect of this.hitEffects) {
+      const elapsed = currentTime - effect.time;
+      if (elapsed > effectDuration) continue;
+
+      const x = this.columnX[effect.direction];
+      const y = this.receptorY;
+      const progress = elapsed / effectDuration;
+
+      // Skip drawing for misses
+      if (effect.grade === 'miss') continue;
+
+      this.ctx.save();
+      this.ctx.translate(x, y);
+
+      // Rotate based on direction
+      const rotations: Record<Direction, number> = {
+        up: 0,
+        down: Math.PI,
+        left: -Math.PI / 2,
+        right: Math.PI / 2,
+      };
+      this.ctx.rotate(rotations[effect.direction]);
+
+      // Get color based on judgment
+      const color = THEME.judgment[effect.grade];
+
+      // Expanding arrow effect
+      const baseSize = LAYOUT.arrowSize / 2;
+      const scale = 1 + progress * 0.5; // Expand to 1.5x
+      const alpha = 1 - progress; // Fade out
+
+      this.ctx.globalAlpha = alpha * 0.9;
+      this.ctx.scale(scale, scale);
+
+      // Draw arrow shape (outline only)
+      const s = baseSize;
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, -s * 0.95);
+      this.ctx.lineTo(s * 0.95, s * 0.1);
+      this.ctx.lineTo(s * 0.35, s * 0.1);
+      this.ctx.lineTo(s * 0.35, s * 0.95);
+      this.ctx.lineTo(-s * 0.35, s * 0.95);
+      this.ctx.lineTo(-s * 0.35, s * 0.1);
+      this.ctx.lineTo(-s * 0.95, s * 0.1);
+      this.ctx.closePath();
+
+      // Glow effect
+      this.ctx.shadowColor = color;
+      this.ctx.shadowBlur = 20 * alpha;
+
+      // Stroke only (no fill) with judgment color
+      this.ctx.strokeStyle = color;
+      this.ctx.lineWidth = 4;
+      this.ctx.lineJoin = 'miter';
+      this.ctx.stroke();
+
+      this.ctx.restore();
+    }
+
+    // Clean up old effects
+    this.hitEffects = this.hitEffects.filter(e => currentTime - e.time < effectDuration);
+  }
+
+  /**
    * Draw judgment text
    */
   drawJudgment(currentTime: number): void {
@@ -442,38 +530,117 @@ export class Renderer {
   /**
    * Update combo display
    */
-  setCombo(combo: number): void {
+  setCombo(combo: number, currentTime: number): void {
+    if (combo > this.displayCombo && this.displayCombo > 0) {
+      this.comboIncreaseTime = currentTime;
+    }
     this.displayCombo = combo;
   }
 
   /**
-   * Draw combo counter
+   * Draw combo counter with effects
    */
-  drawCombo(): void {
+  drawCombo(currentTime: number): void {
     if (this.displayCombo < 4) return; // Only show combo at 4+
 
     this.ctx.save();
-    this.ctx.font = 'bold 48px -apple-system, sans-serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
+
+    // Calculate animation based on combo increase
+    const timeSinceIncrease = currentTime - this.comboIncreaseTime;
+    const animProgress = Math.min(1, timeSinceIncrease / 200);
+
+    // Scale effect on combo increase
+    let scale = 1;
+    if (timeSinceIncrease < 200) {
+      scale = 1 + 0.3 * (1 - animProgress);
+    }
+
+    // Position
+    const centerX = this.width / 2;
+    const centerY = this.height * 0.48;
+
+    this.ctx.translate(centerX, centerY);
+    this.ctx.scale(scale, scale);
+    this.ctx.translate(-centerX, -centerY);
+
+    // Glow effect for high combos
+    if (this.displayCombo >= 20) {
+      const glowIntensity = Math.min(1, (this.displayCombo - 20) / 50);
+      const pulsePhase = (currentTime / 100) % (Math.PI * 2);
+      const pulse = 0.5 + 0.5 * Math.sin(pulsePhase);
+
+      this.ctx.shadowColor = this.getComboColor(this.displayCombo);
+      this.ctx.shadowBlur = 20 + pulse * 15 * glowIntensity;
+    }
 
     const text = `${this.displayCombo}`;
 
-    // Draw shadow
-    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    this.ctx.fillText(text, this.width / 2 + 2, this.height * 0.5 + 2);
+    // Font size based on combo
+    const baseSize = this.displayCombo >= 100 ? 56 : this.displayCombo >= 50 ? 52 : 48;
+    this.ctx.font = `bold ${baseSize}px -apple-system, sans-serif`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
 
-    // Draw text with gradient based on combo
-    const hue = (this.displayCombo * 3) % 360;
-    this.ctx.fillStyle = `hsl(${hue}, 100%, 60%)`;
-    this.ctx.fillText(text, this.width / 2, this.height * 0.5);
+    // Multi-layer text effect
+    // Outer shadow
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    this.ctx.fillText(text, centerX + 3, centerY + 3);
 
-    // Draw "COMBO" label
-    this.ctx.font = 'bold 16px -apple-system, sans-serif';
-    this.ctx.fillStyle = THEME.text.secondary;
-    this.ctx.fillText('COMBO', this.width / 2, this.height * 0.5 + 35);
+    // Color based on combo tier
+    const color = this.getComboColor(this.displayCombo);
+
+    // Main text with gradient for high combos
+    if (this.displayCombo >= 50) {
+      const gradient = this.ctx.createLinearGradient(
+        centerX - 50, centerY - 30,
+        centerX + 50, centerY + 30
+      );
+      gradient.addColorStop(0, this.lightenColor(color, 20));
+      gradient.addColorStop(0.5, color);
+      gradient.addColorStop(1, this.lightenColor(color, 20));
+      this.ctx.fillStyle = gradient;
+    } else {
+      this.ctx.fillStyle = color;
+    }
+
+    this.ctx.fillText(text, centerX, centerY);
+
+    // Inner highlight
+    this.ctx.globalAlpha = 0.4;
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText(text, centerX, centerY - 2);
+
+    this.ctx.globalAlpha = 1;
+    this.ctx.shadowBlur = 0;
+
+    // "COMBO" label with tier color
+    this.ctx.font = 'bold 14px -apple-system, sans-serif';
+    this.ctx.fillStyle = color;
+    this.ctx.globalAlpha = 0.9;
+    this.ctx.fillText('COMBO', centerX, centerY + 38);
+
+    // Milestone indicator
+    if (this.displayCombo % 50 === 0 && timeSinceIncrease < 500) {
+      const milestoneAlpha = 1 - timeSinceIncrease / 500;
+      this.ctx.globalAlpha = milestoneAlpha;
+      this.ctx.font = 'bold 20px -apple-system, sans-serif';
+      this.ctx.fillStyle = '#ffdd00';
+      this.ctx.fillText('★ MILESTONE ★', centerX, centerY - 50);
+    }
 
     this.ctx.restore();
+  }
+
+  /**
+   * Get color based on combo tier
+   */
+  private getComboColor(combo: number): string {
+    if (combo >= 100) return '#ff00ff'; // Magenta - legendary
+    if (combo >= 50) return '#ffdd00';  // Gold - amazing
+    if (combo >= 30) return '#00ffff';  // Cyan - great
+    if (combo >= 20) return '#00ff88';  // Green - good
+    if (combo >= 10) return '#88aaff';  // Blue - building
+    return '#aaaaaa';                   // Gray - starting
   }
 
   /**
@@ -493,24 +660,128 @@ export class Renderer {
   }
 
   /**
-   * Draw progress bar
+   * Draw progress bar (centered, Diablo 3 fluid style)
    */
   drawProgress(current: number, total: number): void {
     if (total <= 0) return;
 
-    const progress = Math.min(1, current / total);
-    const barWidth = 200;
-    const barHeight = 4;
-    const x = 20;
-    const y = 20;
+    const progress = Math.min(1, Math.max(0, current / total));
+    const barWidth = LAYOUT.arrowSize * 4 + LAYOUT.arrowGap * 3;
+    const barHeight = 10;
+    const x = (this.width - barWidth) / 2;
+    const y = this.height - 32;
+    const radius = 5;
 
-    // Background
-    this.ctx.fillStyle = THEME.bg.tertiary;
-    this.ctx.fillRect(x, y, barWidth, barHeight);
+    this.ctx.save();
 
-    // Progress
-    this.ctx.fillStyle = THEME.accent.primary;
-    this.ctx.fillRect(x, y, barWidth * progress, barHeight);
+    // Background with glass effect
+    const bgGradient = this.ctx.createLinearGradient(x, y, x, y + barHeight);
+    bgGradient.addColorStop(0, '#0a0a12');
+    bgGradient.addColorStop(0.5, '#151520');
+    bgGradient.addColorStop(1, '#0a0a12');
+
+    this.roundRect(x, y, barWidth, barHeight, radius);
+    this.ctx.fillStyle = bgGradient;
+    this.ctx.fill();
+
+    // Progress fill with fluid effect
+    if (progress > 0) {
+      // Clipping for fill
+      this.ctx.save();
+      this.roundRect(x + 2, y + 2, barWidth - 4, barHeight - 4, radius - 2);
+      this.ctx.clip();
+
+      const fillWidth = (barWidth - 4) * progress;
+      const waveTime = Date.now() / 300;
+
+      // Liquid gradient (vertical for depth)
+      const liquidGradient = this.ctx.createLinearGradient(x, y, x, y + barHeight);
+      liquidGradient.addColorStop(0, '#2266cc');
+      liquidGradient.addColorStop(0.3, '#4488ff');
+      liquidGradient.addColorStop(0.5, '#66aaff');
+      liquidGradient.addColorStop(0.7, '#4488ff');
+      liquidGradient.addColorStop(1, '#2266cc');
+
+      // Draw liquid with wave on right edge
+      this.ctx.beginPath();
+      this.ctx.moveTo(x + 2, y + 2);
+
+      // Top edge
+      this.ctx.lineTo(x + 2 + fillWidth - 3, y + 2);
+
+      // Right edge with wave
+      for (let wy = 0; wy <= barHeight - 4; wy += 2) {
+        const waveX = x + 2 + fillWidth + Math.sin(waveTime + wy * 0.5) * 2;
+        this.ctx.lineTo(waveX, y + 2 + wy);
+      }
+
+      // Bottom and left edges
+      this.ctx.lineTo(x + 2, y + barHeight - 2);
+      this.ctx.closePath();
+
+      this.ctx.fillStyle = liquidGradient;
+      this.ctx.fill();
+
+      // Highlight streak on top
+      const streakGradient = this.ctx.createLinearGradient(x, y + 3, x, y + 5);
+      streakGradient.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
+      streakGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+      this.ctx.fillStyle = streakGradient;
+      this.ctx.fillRect(x + 4, y + 3, fillWidth - 6, 2);
+
+      this.ctx.restore();
+    }
+
+    // Glass rim (outer border)
+    const rimGradient = this.ctx.createLinearGradient(x, y, x + barWidth, y + barHeight);
+    rimGradient.addColorStop(0, '#555566');
+    rimGradient.addColorStop(0.5, '#333340');
+    rimGradient.addColorStop(1, '#444455');
+
+    this.ctx.strokeStyle = rimGradient;
+    this.ctx.lineWidth = 2;
+    this.roundRect(x, y, barWidth, barHeight, radius);
+    this.ctx.stroke();
+
+    // Inner highlight
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    this.ctx.lineWidth = 1;
+    this.roundRect(x + 1, y + 1, barWidth - 2, barHeight - 2, radius - 1);
+    this.ctx.stroke();
+
+    this.ctx.restore();
+  }
+
+  /**
+   * Draw difficulty indicator
+   */
+  drawDifficulty(difficulty: string, level: number): void {
+    const totalWidth = LAYOUT.arrowSize * 4 + LAYOUT.arrowGap * 3;
+    const x = (this.width - totalWidth) / 2;
+    const y = this.height - 55;
+
+    this.ctx.save();
+
+    // Difficulty name with color based on difficulty
+    const diffColors: Record<string, string> = {
+      'Beginner': '#88ff88',
+      'Easy': '#88ff88',
+      'Medium': '#ffff44',
+      'Hard': '#ff8844',
+      'Challenge': '#ff4488',
+    };
+
+    // Draw difficulty and level together
+    this.ctx.font = 'bold 14px -apple-system, sans-serif';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillStyle = diffColors[difficulty] ?? THEME.text.primary;
+
+    const text = `${difficulty} Lv.${level}`;
+    this.ctx.fillText(text, x, y);
+
+    this.ctx.restore();
   }
 
   /**
@@ -557,15 +828,16 @@ export class Renderer {
     this.clear();
     this.drawLanes();
     this.drawReceptors(currentTime, heldDirections);
+    this.drawHitEffects(currentTime);
     this.drawNotes(state.activeNotes, currentTime, cmod, state.song.bpm);
     this.drawJudgment(currentTime);
-    this.setCombo(state.combo);
-    this.drawCombo();
+    this.setCombo(state.combo, currentTime);
+    this.drawCombo(currentTime);
     this.drawScore(state.score);
     this.drawHealthBar(health);
     this.drawCmodIndicator(cmod, state.song.bpm);
-    this.drawProgress(currentTime, state.song.charts[0]?.notes.length ?
-      state.chart.notes[state.chart.notes.length - 1]?.time ?? 0 : 0);
+    this.drawDifficulty(state.chart.difficulty, state.chart.level);
+    this.drawProgress(currentTime, state.chart.notes[state.chart.notes.length - 1]?.time ?? 0);
 
     if (state.paused) {
       this.drawPauseOverlay();
@@ -573,87 +845,212 @@ export class Renderer {
   }
 
   /**
-   * Draw CMod indicator
+   * Draw CMod indicator (positioned near the game area)
    */
   drawCmodIndicator(cmod: number, bpm: number = 120): void {
+    const totalLaneWidth = LAYOUT.arrowSize * 4 + LAYOUT.arrowGap * 3;
+    const lanesEndX = (this.width + totalLaneWidth) / 2;
+
     this.ctx.save();
     this.ctx.font = 'bold 14px -apple-system, sans-serif';
-    this.ctx.textAlign = 'left';
-    this.ctx.textBaseline = 'top';
+    this.ctx.textAlign = 'right';
+    this.ctx.textBaseline = 'middle';
     this.ctx.fillStyle = THEME.text.secondary;
     // Show "BPM" when cmod is 0, otherwise show "C{speed}"
     const label = cmod === 0 ? `${bpm} BPM` : `C${cmod}`;
-    this.ctx.fillText(label, 20, 35);
+    this.ctx.fillText(label, lanesEndX, this.height - 55);
     this.ctx.restore();
   }
 
   /**
-   * Draw health bar (vertical bar on the left side)
+   * Draw Diablo 3 style health bar (vertical, with fluid animation)
    */
   drawHealthBar(health: number): void {
+    // Position to the left of the lanes
+    const totalLaneWidth = LAYOUT.arrowSize * 4 + LAYOUT.arrowGap * 3;
+    const lanesX = (this.width - totalLaneWidth) / 2;
     const barWidth = 16;
-    const barHeight = this.height * 0.4;
-    const x = 15;
-    const y = this.height * 0.3;
-    const radius = 4;
+    const barHeight = this.height * 0.45;
+    const x = lanesX - barWidth - 25;
+    const y = (this.height - barHeight) / 2;
+    const radius = 8;
 
-    // Background
-    this.ctx.fillStyle = THEME.bg.tertiary;
+    this.ctx.save();
+
+    // Outer glow for low health - pulsing red
+    if (health < 30) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 150);
+      this.ctx.shadowColor = '#ff2200';
+      this.ctx.shadowBlur = 15 + pulse * 10;
+    }
+
+    // Draw bar background (dark glass)
+    const bgGradient = this.ctx.createLinearGradient(x, y, x + barWidth, y);
+    bgGradient.addColorStop(0, '#0a0a12');
+    bgGradient.addColorStop(0.5, '#151520');
+    bgGradient.addColorStop(1, '#0a0a12');
+
     this.roundRect(x, y, barWidth, barHeight, radius);
+    this.ctx.fillStyle = bgGradient;
     this.ctx.fill();
 
-    // Health fill (from bottom up)
-    const fillHeight = (health / 100) * barHeight;
-    const fillY = y + barHeight - fillHeight;
+    this.ctx.shadowBlur = 0;
 
-    // Color based on health level
-    let healthColor: string;
-    if (health > 60) {
-      healthColor = '#00ff88'; // Green
-    } else if (health > 30) {
-      healthColor = '#ffaa00'; // Orange
-    } else {
-      healthColor = '#ff4444'; // Red
+    // Draw liquid health fill
+    if (health > 0) {
+      // Clipping path for bar
+      this.ctx.save();
+      this.roundRect(x + 2, y + 2, barWidth - 4, barHeight - 4, radius - 2);
+      this.ctx.clip();
+
+      // Calculate fill level (from bottom)
+      const fillHeight = (health / 100) * (barHeight - 4);
+      const fillTop = y + barHeight - 2 - fillHeight;
+
+      // Animated wave effect on top of liquid
+      const waveTime = Date.now() / 400;
+      const waveHeight = 2 + (health < 30 ? Math.sin(Date.now() / 100) * 1.5 : 0);
+
+      // Health color based on level
+      let liquidColor: string;
+      let liquidHighlight: string;
+      let liquidDark: string;
+      if (health > 60) {
+        liquidColor = '#cc2222';
+        liquidHighlight = '#ff4444';
+        liquidDark = '#881111';
+      } else if (health > 30) {
+        liquidColor = '#cc6600';
+        liquidHighlight = '#ff8800';
+        liquidDark = '#884400';
+      } else {
+        liquidColor = '#aa1111';
+        liquidHighlight = '#dd2222';
+        liquidDark = '#660808';
+      }
+
+      // Liquid gradient (horizontal for depth effect)
+      const liquidGradient = this.ctx.createLinearGradient(x, y, x + barWidth, y);
+      liquidGradient.addColorStop(0, liquidDark);
+      liquidGradient.addColorStop(0.3, liquidColor);
+      liquidGradient.addColorStop(0.5, liquidHighlight);
+      liquidGradient.addColorStop(0.7, liquidColor);
+      liquidGradient.addColorStop(1, liquidDark);
+
+      // Draw liquid with wave on top
+      this.ctx.beginPath();
+      this.ctx.moveTo(x, y + barHeight);
+
+      // Wave effect on top surface
+      for (let wx = 0; wx <= barWidth; wx += 2) {
+        const waveY = fillTop + Math.sin(waveTime + wx * 0.3) * waveHeight;
+        this.ctx.lineTo(x + wx, waveY);
+      }
+
+      this.ctx.lineTo(x + barWidth, y + barHeight);
+      this.ctx.closePath();
+      this.ctx.fillStyle = liquidGradient;
+      this.ctx.fill();
+
+      // Bubbles animation
+      this.updateHealthBubbles(x + barWidth / 2, y + barHeight - fillHeight / 2, barWidth / 2, fillTop);
+      this.drawHealthBubbles(liquidHighlight);
+
+      // Vertical highlight streak (glass effect)
+      const streakGradient = this.ctx.createLinearGradient(x + 3, y, x + 6, y);
+      streakGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      streakGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)');
+      streakGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+      this.ctx.fillStyle = streakGradient;
+      this.ctx.fillRect(x + 3, fillTop + 5, 4, fillHeight - 10);
+
+      this.ctx.restore();
     }
 
-    // Create gradient for health bar
-    const gradient = this.ctx.createLinearGradient(x, fillY, x, fillY + fillHeight);
-    gradient.addColorStop(0, this.lightenColor(healthColor, 20));
-    gradient.addColorStop(1, healthColor);
+    // Glass rim (outer border)
+    const rimGradient = this.ctx.createLinearGradient(x, y, x + barWidth, y + barHeight);
+    rimGradient.addColorStop(0, '#555566');
+    rimGradient.addColorStop(0.3, '#333340');
+    rimGradient.addColorStop(0.7, '#222230');
+    rimGradient.addColorStop(1, '#444455');
 
-    this.ctx.fillStyle = gradient;
-
-    // Draw filled portion with rounded bottom corners
-    this.ctx.beginPath();
-    if (fillHeight >= radius * 2) {
-      // Full rounded corners at bottom
-      this.ctx.moveTo(x + radius, fillY);
-      this.ctx.lineTo(x + barWidth - radius, fillY);
-      this.ctx.lineTo(x + barWidth - radius, fillY + fillHeight - radius);
-      this.ctx.quadraticCurveTo(x + barWidth, fillY + fillHeight, x + barWidth - radius, fillY + fillHeight);
-      this.ctx.lineTo(x + radius, fillY + fillHeight);
-      this.ctx.quadraticCurveTo(x, fillY + fillHeight, x, fillY + fillHeight - radius);
-      this.ctx.lineTo(x, fillY);
-    } else {
-      // Simple rect for small amounts
-      this.ctx.rect(x, fillY, barWidth, fillHeight);
-    }
-    this.ctx.fill();
-
-    // Border
-    this.ctx.strokeStyle = THEME.text.muted;
-    this.ctx.lineWidth = 1;
+    this.ctx.strokeStyle = rimGradient;
+    this.ctx.lineWidth = 3;
     this.roundRect(x, y, barWidth, barHeight, radius);
     this.ctx.stroke();
 
-    // 50% marker line
-    const markerY = y + barHeight * 0.5;
-    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    // Inner highlight
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     this.ctx.lineWidth = 1;
-    this.ctx.beginPath();
-    this.ctx.moveTo(x, markerY);
-    this.ctx.lineTo(x + barWidth, markerY);
+    this.roundRect(x + 2, y + 2, barWidth - 4, barHeight - 4, radius - 2);
     this.ctx.stroke();
+
+    // Health percentage text below bar
+    this.ctx.font = 'bold 12px -apple-system, sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'top';
+
+    if (health < 30) {
+      this.ctx.shadowColor = '#ff4444';
+      this.ctx.shadowBlur = 8;
+    }
+
+    const textColor = health > 60 ? '#ff6666' : health > 30 ? '#ffaa44' : '#ff4444';
+    this.ctx.fillStyle = textColor;
+    this.ctx.fillText(`${Math.round(health)}%`, x + barWidth / 2, y + barHeight + 8);
+
+    this.ctx.restore();
+  }
+
+  /**
+   * Update health bar bubbles
+   */
+  private updateHealthBubbles(centerX: number, centerY: number, halfWidth: number, fillTop: number): void {
+    // Add new bubbles occasionally
+    if (Math.random() < 0.08 && this.healthBubbles.length < 5) {
+      const xOffset = (Math.random() - 0.5) * halfWidth * 1.5;
+      this.healthBubbles.push({
+        x: centerX + xOffset,
+        y: centerY + halfWidth * 2,
+        size: 1.5 + Math.random() * 2.5,
+        speed: 0.4 + Math.random() * 0.8,
+        opacity: 0.3 + Math.random() * 0.4,
+      });
+    }
+
+    // Update existing bubbles
+    for (let i = this.healthBubbles.length - 1; i >= 0; i--) {
+      const bubble = this.healthBubbles[i]!;
+      bubble.y -= bubble.speed;
+      bubble.x += Math.sin(Date.now() / 300 + i) * 0.2;
+
+      // Remove bubbles that reach the top
+      if (bubble.y < fillTop - 3) {
+        this.healthBubbles.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * Draw health bar bubbles
+   */
+  private drawHealthBubbles(color: string): void {
+    for (const bubble of this.healthBubbles) {
+      this.ctx.globalAlpha = bubble.opacity;
+      this.ctx.fillStyle = color;
+      this.ctx.beginPath();
+      this.ctx.arc(bubble.x, bubble.y, bubble.size, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Bubble highlight
+      this.ctx.globalAlpha = bubble.opacity * 0.5;
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.beginPath();
+      this.ctx.arc(bubble.x - bubble.size * 0.3, bubble.y - bubble.size * 0.3, bubble.size * 0.3, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+    this.ctx.globalAlpha = 1;
   }
 
   /**
