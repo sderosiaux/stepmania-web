@@ -1555,7 +1555,8 @@ export class Renderer {
     const alpha = 1 - elapsed / duration;
     const scale = 1 + elapsed / duration * 0.2;
     const centerX = this.width / 2;
-    const centerY = this.height * 0.38;
+    // Keep timing panel at top for both modes
+    const centerY = this.noteSkin === 'gems' ? this.height * 0.12 : this.height * 0.38;
 
     const text = this.lastJudgment.grade.toUpperCase();
     const color = THEME.judgment[this.lastJudgment.grade];
@@ -1647,9 +1648,9 @@ export class Renderer {
       scale = 1 + 0.3 * (1 - animProgress);
     }
 
-    // Position
+    // Position - keep at top for gems mode
     const centerX = this.width / 2;
-    const centerY = this.height * 0.48;
+    const centerY = this.noteSkin === 'gems' ? this.height * 0.22 : this.height * 0.48;
 
     this.ctx.translate(centerX, centerY);
     this.ctx.scale(scale, scale);

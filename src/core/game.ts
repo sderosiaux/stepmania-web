@@ -299,11 +299,18 @@ export class GameController {
       this.countdown.count = currentCount;
     }
 
-    // Render countdown
+    // Render countdown with song info and timing panel
     this.renderer.clear();
     this.renderer.drawLanes();
     this.renderer.drawReceptors(timestamp, new Set());
     this.renderer.drawCountdown(this.countdown.count);
+
+    // Show song info during countdown
+    if (this.state) {
+      this.renderer.drawSongInfo(this.state.song.title, this.state.song.artist);
+      this.renderer.drawScore(0);
+      this.renderer.drawHealthBar(50);
+    }
   }
 
   /**
