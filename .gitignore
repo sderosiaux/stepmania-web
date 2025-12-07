@@ -33,3 +33,4 @@ npm-debug.log*
 # Songs (local symlinks, generated manifest)
 public/songs/*
 !public/songs/.gitkeep
+!public/songs/_Mazu
