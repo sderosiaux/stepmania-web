@@ -390,49 +390,45 @@ export class SongSelectScreen {
     switch (e.code) {
       case 'ArrowUp':
         e.preventDefault();
-        if (this.activeColumn === 'packs') {
-          const prevPackIndex = this.selectedPackIndex;
-          this.selectedPackIndex = Math.max(0, this.selectedPackIndex - 1);
-          if (prevPackIndex !== this.selectedPackIndex) {
-            this.selectedSongIndex = 0;
-            this.selectedDifficultyIndex = 0;
-            this.render(); // Pack changed - need full render for new song list
-          }
-        } else if (this.activeColumn === 'songs') {
-          const prevSongIndex = this.selectedSongIndex;
-          this.selectedSongIndex = Math.max(0, this.selectedSongIndex - 1);
-          if (prevSongIndex !== this.selectedSongIndex) {
-            this.selectedDifficultyIndex = 0;
-            this.render(); // Song changed - need to update chart details
-          }
+        if (this.activeColumn === 'packs' && this.packs.length > 0) {
+          this.selectedPackIndex = this.selectedPackIndex <= 0
+            ? this.packs.length - 1  // Wrap to end
+            : this.selectedPackIndex - 1;
+          this.selectedSongIndex = 0;
+          this.selectedDifficultyIndex = 0;
+          this.render();
+        } else if (this.activeColumn === 'songs' && currentPack && currentPack.songs.length > 0) {
+          this.selectedSongIndex = this.selectedSongIndex <= 0
+            ? currentPack.songs.length - 1  // Wrap to end
+            : this.selectedSongIndex - 1;
+          this.selectedDifficultyIndex = 0;
+          this.render();
         } else if (this.activeColumn === 'difficulties' && currentSong) {
           this.selectedDifficultyIndex = Math.max(0, this.selectedDifficultyIndex - 1);
-          this.updateSelection(); // Just update selection class
-          this.updateChartDetails(); // Update only the chart details panel
+          this.updateSelection();
+          this.updateChartDetails();
         }
         break;
 
       case 'ArrowDown':
         e.preventDefault();
-        if (this.activeColumn === 'packs') {
-          const prevPackIndex = this.selectedPackIndex;
-          this.selectedPackIndex = Math.min(this.packs.length - 1, this.selectedPackIndex + 1);
-          if (prevPackIndex !== this.selectedPackIndex) {
-            this.selectedSongIndex = 0;
-            this.selectedDifficultyIndex = 0;
-            this.render(); // Pack changed - need full render for new song list
-          }
-        } else if (this.activeColumn === 'songs' && currentPack) {
-          const prevSongIndex = this.selectedSongIndex;
-          this.selectedSongIndex = Math.min(currentPack.songs.length - 1, this.selectedSongIndex + 1);
-          if (prevSongIndex !== this.selectedSongIndex) {
-            this.selectedDifficultyIndex = 0;
-            this.render(); // Song changed - need to update chart details
-          }
+        if (this.activeColumn === 'packs' && this.packs.length > 0) {
+          this.selectedPackIndex = this.selectedPackIndex >= this.packs.length - 1
+            ? 0  // Wrap to start
+            : this.selectedPackIndex + 1;
+          this.selectedSongIndex = 0;
+          this.selectedDifficultyIndex = 0;
+          this.render();
+        } else if (this.activeColumn === 'songs' && currentPack && currentPack.songs.length > 0) {
+          this.selectedSongIndex = this.selectedSongIndex >= currentPack.songs.length - 1
+            ? 0  // Wrap to start
+            : this.selectedSongIndex + 1;
+          this.selectedDifficultyIndex = 0;
+          this.render();
         } else if (this.activeColumn === 'difficulties' && currentSong) {
           this.selectedDifficultyIndex = Math.min(currentSong.charts.length - 1, this.selectedDifficultyIndex + 1);
-          this.updateSelection(); // Just update selection class
-          this.updateChartDetails(); // Update only the chart details panel
+          this.updateSelection();
+          this.updateChartDetails();
         }
         break;
 
@@ -536,25 +532,37 @@ export class SongSelectScreen {
           <div class="column packs-column ${this.activeColumn === 'packs' ? 'active' : ''}">
             <div class="column-header">PACKS</div>
             <div class="column-list">
-              <div class="wheel-viewport" style="--item-height: 44px; --selected-idx: ${this.selectedPackIndex}">
-                <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc(var(--selected-idx) * var(--item-height) * -1))">
-                  ${this.packs.length === 0 ? '<div class="empty">No songs</div>' : this.packs.map((pack, i) => {
-                    const offset = i - this.selectedPackIndex;
-                    const absOffset = Math.abs(offset);
-                    const rotateX = offset * -3;
-                    const translateZ = -absOffset * 5;
-                    const opacity = Math.max(0.35, 1 - absOffset * 0.1);
-                    const scale = Math.max(0.9, 1 - absOffset * 0.02);
-                    return `
-                      <div class="list-item wheel-item ${i === this.selectedPackIndex ? 'selected' : ''}"
-                           data-pack="${i}"
-                           style="transform: rotateX(${rotateX}deg) translateZ(${translateZ}px) scale(${scale}); opacity: ${opacity};">
-                        <span class="item-icon">📁</span>
-                        <span class="item-name">${escapeHtml(pack.name)}</span>
-                        <span class="item-count">${pack.songs.length}</span>
-                      </div>
-                    `;
-                  }).join('')}
+              <div class="wheel-viewport" style="--item-height: 44px; --total-items: ${this.packs.length}; --selected-idx: ${this.selectedPackIndex}; --sep-height: 18px">
+                <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc((var(--total-items) * var(--item-height) + var(--sep-height) + var(--selected-idx) * var(--item-height)) * -1))">
+                  ${this.packs.length === 0 ? '<div class="empty">No songs</div>' : (() => {
+                    // Render 3 copies: before separator, main, after separator
+                    const renderPack = (pack: SongPack, realIndex: number, virtualOffset: number) => {
+                      const offset = virtualOffset - this.selectedPackIndex;
+                      const absOffset = Math.abs(offset);
+                      const rotateX = offset * -3;
+                      const translateZ = -absOffset * 5;
+                      const opacity = Math.max(0.35, 1 - absOffset * 0.1);
+                      const scale = Math.max(0.9, 1 - absOffset * 0.02);
+                      return `
+                        <div class="list-item wheel-item ${virtualOffset === this.selectedPackIndex ? 'selected' : ''}"
+                             data-pack="${realIndex}"
+                             style="transform: rotateX(${rotateX}deg) translateZ(${translateZ}px) scale(${scale}); opacity: ${opacity};">
+                          <span class="item-icon">📁</span>
+                          <span class="item-name">${escapeHtml(pack.name)}</span>
+                          <span class="item-count">${pack.songs.length}</span>
+                        </div>
+                      `;
+                    };
+                    const separator = `<div class="wheel-separator"></div>`;
+                    const n = this.packs.length;
+                    // Previous cycle (negative offsets)
+                    const prevCycle = this.packs.map((pack, i) => renderPack(pack, i, i - n)).join('');
+                    // Main cycle
+                    const mainCycle = this.packs.map((pack, i) => renderPack(pack, i, i)).join('');
+                    // Next cycle (positive offsets beyond n)
+                    const nextCycle = this.packs.map((pack, i) => renderPack(pack, i, i + n)).join('');
+                    return prevCycle + separator + mainCycle + separator + nextCycle;
+                  })()}
                 </div>
               </div>
             </div>
@@ -564,35 +572,43 @@ export class SongSelectScreen {
           <div class="column songs-column ${this.activeColumn === 'songs' ? 'active' : ''}">
             <div class="column-header">SONGS</div>
             <div class="column-list">
-              <div class="wheel-viewport" style="--item-height: 52px; --selected-idx: ${this.selectedSongIndex}">
-                <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc(var(--selected-idx) * var(--item-height) * -1))">
-                  ${!currentPack ? '<div class="empty">Select a pack</div>' : currentPack.songs.map((song, i) => {
-                    const offset = i - this.selectedSongIndex;
-                    const absOffset = Math.abs(offset);
-                    const rotateX = offset * -3;
-                    const translateZ = -absOffset * 5;
-                    const opacity = Math.max(0.35, 1 - absOffset * 0.1);
-                    const scale = Math.max(0.9, 1 - absOffset * 0.02);
-                    // Get best grade across all difficulties
-                    const grades = song.charts.map(c => getScore(song.id, c.difficulty)).filter(Boolean);
-                    const bestGrade = grades.length > 0 ? grades.sort((a, b) => {
-                      const order = ['AAAA', 'AAA', 'AA', 'A', 'B', 'C', 'D'];
-                      return order.indexOf(a!.grade) - order.indexOf(b!.grade);
-                    })[0] : null;
-                    return `
-                      <div class="list-item wheel-item ${i === this.selectedSongIndex ? 'selected' : ''}"
-                           data-song="${i}"
-                           style="transform: rotateX(${rotateX}deg) translateZ(${translateZ}px) scale(${scale}); opacity: ${opacity};">
-                        <div class="song-row">
-                          <span class="item-name">${escapeHtml(song.title)}</span>
-                          ${bestGrade ? `<span class="best-grade grade-${bestGrade.grade.toLowerCase()}">${bestGrade.grade}</span>` : ''}
+              <div class="wheel-viewport" style="--item-height: 56px; --total-items: ${currentPack?.songs.length || 0}; --selected-idx: ${this.selectedSongIndex}; --sep-height: 18px">
+                <div class="wheel-container" style="top: calc(50% - var(--item-height) / 2); transform: translateY(calc((var(--total-items) * var(--item-height) + var(--sep-height) + var(--selected-idx) * var(--item-height)) * -1))">
+                  ${!currentPack ? '<div class="empty">Select a pack</div>' : (() => {
+                    const songs = currentPack.songs;
+                    const renderSong = (song: Song, realIndex: number, virtualOffset: number) => {
+                      const offset = virtualOffset - this.selectedSongIndex;
+                      const absOffset = Math.abs(offset);
+                      const rotateX = offset * -3;
+                      const translateZ = -absOffset * 5;
+                      const opacity = Math.max(0.35, 1 - absOffset * 0.1);
+                      const scale = Math.max(0.9, 1 - absOffset * 0.02);
+                      const grades = song.charts.map(c => getScore(song.id, c.difficulty)).filter(Boolean);
+                      const bestGrade = grades.length > 0 ? grades.sort((a, b) => {
+                        const order = ['AAAA', 'AAA', 'AA', 'A', 'B', 'C', 'D'];
+                        return order.indexOf(a!.grade) - order.indexOf(b!.grade);
+                      })[0] : null;
+                      return `
+                        <div class="list-item wheel-item ${virtualOffset === this.selectedSongIndex ? 'selected' : ''}"
+                             data-song="${realIndex}"
+                             style="transform: rotateX(${rotateX}deg) translateZ(${translateZ}px) scale(${scale}); opacity: ${opacity};">
+                          <div class="song-row">
+                            <span class="item-name">${escapeHtml(song.title)}</span>
+                            ${bestGrade ? `<span class="best-grade grade-${bestGrade.grade.toLowerCase()}">${bestGrade.grade}</span>` : ''}
+                          </div>
+                          <div class="song-meta">
+                            <span class="artist">${escapeHtml(song.artist)}</span>
+                          </div>
                         </div>
-                        <div class="song-meta">
-                          <span class="artist">${escapeHtml(song.artist)}</span>
-                        </div>
-                      </div>
-                    `;
-                  }).join('')}
+                      `;
+                    };
+                    const separator = `<div class="wheel-separator"></div>`;
+                    const n = songs.length;
+                    const prevCycle = songs.map((song, i) => renderSong(song, i, i - n)).join('');
+                    const mainCycle = songs.map((song, i) => renderSong(song, i, i)).join('');
+                    const nextCycle = songs.map((song, i) => renderSong(song, i, i + n)).join('');
+                    return prevCycle + separator + mainCycle + separator + nextCycle;
+                  })()}
                 </div>
               </div>
             </div>
@@ -1149,6 +1165,22 @@ export class SongSelectScreen {
 
       .wheel-item.selected {
         opacity: 1 !important;
+      }
+
+      /* Golden separator between wheel cycles */
+      .wheel-separator {
+        height: 2px;
+        margin: 8px 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          #d4af37 20%,
+          #ffd700 50%,
+          #d4af37 80%,
+          transparent 100%
+        );
+        box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+        border-radius: 1px;
       }
 
       /* Wheel edge fade overlay */
