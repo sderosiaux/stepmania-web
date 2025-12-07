@@ -1008,7 +1008,7 @@ export class SongSelectScreen {
   private renderSkinSelector(): string {
     const skinLabels: Record<NoteSkin, string> = {
       arrows: '↑ Arrows',
-      gems: '● Gems',
+      gems: '● Gems (alpha)',
     };
     return `
       <div class="skin-selector">
